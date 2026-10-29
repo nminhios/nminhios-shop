@@ -10,7 +10,7 @@
 @media(max-width:390px){.main-area{padding:0 12px}.topbar{gap:6px}.search-box{max-width:140px}.welcome-row h1{font-size:23px}.hero-banner{min-height:305px;padding:20px 15px}.hero-content h2{font-size:22px}.hero-content p{max-width:220px}.hero-art{right:-20%;opacity:.55}.category-cards{grid-template-columns:1fr 1fr}.cat-card-text small{max-width:90px}.product-visual,.shop-product-grid .product-visual{height:108px}.product-info{padding:10px 8px}.product-bottom{gap:4px}.price-block strong{font-size:12px}.add-btn{width:27px;height:27px}.section-head h2{font-size:15px}.head-controls .link-btn{font-size:8px}.help-grid{grid-template-columns:1fr 1fr}.help-card{min-height:235px}.stat-card strong{font-size:16px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
-/* nminhios shop server mode additions */
+/* nminhios store server mode additions */
 .inventory-form{display:grid;gap:10px;padding:2px 0 8px}
 .inventory-form select,.inventory-form textarea{width:100%;border:1px solid var(--line2);border-radius:11px;background:#0c111b;color:var(--text);padding:12px;font:inherit;resize:vertical;min-width:0}
 .inventory-form textarea{min-height:150px;line-height:1.65;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}

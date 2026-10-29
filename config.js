@@ -1,6 +1,6 @@
 /* Public settings only. Never put passwords, bank API secrets, webhook keys, or private tokens here. */
 window.NMINHIOS_CONFIG = Object.freeze({
-  BRAND: 'nminhios shop',
+  BRAND: 'nminhios store',
   BRAND_AVATAR_URL: 'https://cdn.upanhlaylink.com/i/TLOGJDhT.png',
   DEMO_MODE: true,
   API_BASE_URL: '',

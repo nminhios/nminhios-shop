@@ -21,6 +21,10 @@
   function readJSON(key, fallback) { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
   function writeJSON(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (_) { toast('Không thể lưu dữ liệu', 'Bộ nhớ trình duyệt có thể đã đầy hoặc bị chặn.', 'error'); return false; } }
   function escapeHTML(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+  function currentSellerTier(user=state.currentUser) { const t=String(user?.sellerTier||'').trim(); if(['customer','seller','seller_vip','seller_super_vip'].includes(t)) return t; return user?.isSeller||user?.role==='seller'?'seller':'customer'; }
+  function sellerTierLabel(tier=currentSellerTier()) { return ({customer:'Khách hàng thường',seller:'Seller thường',seller_vip:'Seller VIP',seller_super_vip:'Seller Super VIP'})[tier]||'Khách hàng thường'; }
+  function isWholesaleUser(user=state.currentUser) { return currentSellerTier(user)!=='customer'; }
+  function priceForProduct(p,user=state.currentUser) { const tier=currentSellerTier(user); const prices=p?.tierPrices||{}; const value=tier==='customer'?p?.price:prices[tier]; return Number.isSafeInteger(Number(value))&&Number(value)>=0?Number(value):(Number(p?.price)||0); }
   function money(value) { return new Intl.NumberFormat('vi-VN', { style:'currency', currency:'VND', maximumFractionDigits:0 }).format(Number(value) || 0).replace(/\s/g,''); }
   function shortDate(value) { try { return new Intl.DateTimeFormat('vi-VN',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)); } catch(_) { return String(value || '—'); } }
   function makeId(prefix='NM') { const bytes = new Uint8Array(4); if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes); else for(let i=0;i<bytes.length;i++) bytes[i]=Math.floor(Math.random()*256); return `${prefix}-${Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').toUpperCase()}`; }
@@ -39,9 +43,9 @@
   function saveProfiles(items) { writeJSON(STORAGE.profiles, items); }
   function storeCart() { writeJSON(STORAGE.cart, state.cart); }
   function currentApiBase() { return (readJSON(STORAGE.api, '') || CONFIG.API_BASE_URL || '').replace(/\/+$/,''); }
-  function getCartItems() { const catalog=products(); return state.cart.map(row=>({ ...row, product:catalog.find(p=>p.id===row.id) })).filter(row=>row.product); }
+  function getCartItems() { const catalog=products(); return state.cart.map(row=>({ ...row, product:(()=>{const p=catalog.find(p=>p.id===row.id);return p?{...p,price:priceForProduct(p)}:null;})() })).filter(row=>row.product); }
   function subtotal() { return getCartItems().reduce((s,row)=>s + Math.max(0,Number(row.product.price)||0) * row.qty,0); }
-  function discountAmount() { const personal=Math.max(0,Math.min(90,Number(state.currentUser?.discountPercent)||0)); const rate=personal>0?personal/100:(state.coupon?Number(CONFIG.DEMO_DISCOUNT_RATE||.1):0); return Math.round(subtotal()*rate); }
+  function discountAmount() { const rate=!isWholesaleUser()&&state.coupon?Number(CONFIG.DEMO_DISCOUNT_RATE||.1):0; return Math.round(subtotal()*rate); }
   function total() { return Math.max(0,subtotal()-discountAmount()); }
 
   async function apiRequest(path, options={}) {
@@ -122,8 +126,8 @@
     const posterLabel=p.category==='Menu Key'?'PREMIUM MENU':p.category==='Acc Clone'?'DIGITAL ACCOUNT':p.category==='Acc Game'?'GAMING ACCESS':'DIGITAL SERVICE';
     const artName=escapeHTML(shortTitle.toLocaleUpperCase('vi'));
     const theme=productTheme(p), image=safeImageUrl(p.imageUrl);
-    const original=Number(p.originalPrice)>Number(p.price)?Number(p.originalPrice):0;
-    const discount=original?Math.round((1-Number(p.price)/original)*100):0;
+    const currentPrice=priceForProduct(p); const original=currentSellerTier()==='customer'&&Number(p.originalPrice)>Number(currentPrice)?Number(p.originalPrice):0;
+    const discount=original?Math.round((1-Number(currentPrice)/original)*100):0;
     return `<article class="product-card">
       <div class="product-visual theme-${theme} ${image?'has-product-image':''}" aria-label="Hình minh họa ${escapeHTML(title)}">
         <div class="poster-grid"></div><div class="poster-orbit poster-orbit-a"></div><div class="poster-orbit poster-orbit-b"></div>
@@ -137,8 +141,8 @@
       </div>
       <div class="product-info"><div class="product-category">${escapeHTML(p.category)}</div><h3 title="${escapeHTML(title)}">${escapeHTML(title)}</h3>
         <div class="product-meta"><span><i class="meta-eye">◉</i> ${stock>0?'Có sẵn':'Hết hàng'}</span><span><i>▱</i> Sản phẩm số</span></div>
-        <p class="product-description">${escapeHTML(p.description||'Sản phẩm số từ nminhios shop.')}</p>
-        <div class="product-bottom"><div class="price-block"><strong>${money(p.price)}</strong>${original?`<small><del>${money(original)}</del> · Tiết kiệm ${money(original-Number(p.price))}</small>`:'<small>Giá niêm yết</small>'}</div><span class="price-underline"></span></div>
+        <p class="product-description">${escapeHTML(p.description||'Sản phẩm số từ nminhios store.')}</p>
+        <div class="product-bottom"><div class="price-block"><strong>${money(currentPrice)}</strong>${original?`<small><del>${money(original)}</del> · Tiết kiệm ${money(original-currentPrice)}</small>`:`<small>${currentSellerTier()==='customer'?'Giá niêm yết':escapeHTML(sellerTierLabel())}</small>`}</div><span class="price-underline"></span></div>
         <button class="product-detail-btn" data-product-detail="${escapeHTML(p.id)}">Xem mô tả & ảnh <span>↗</span></button>
         <button class="buy-now-btn" data-buy="${escapeHTML(p.id)}" aria-label="Mua ngay ${escapeHTML(title)}" ${stock<=0?'disabled':''}><span>▱</span> Mua ngay <i>→</i></button>
       </div></article>`;
@@ -146,13 +150,13 @@
   function openProductDetail(id) {
     const p=products().find(x=>x.id===id); if(!p)return;
     const image=safeImageUrl(p.imageUrl), gallery=productGallery(p), images=[...new Set([image,...gallery].filter(Boolean))], heroImage=image||gallery[0]||'';
-    const original=Number(p.originalPrice)>Number(p.price)?Number(p.originalPrice):0;
+    const currentPrice=priceForProduct(p); const original=currentSellerTier()==='customer'&&Number(p.originalPrice)>currentPrice?Number(p.originalPrice):0;
     $('#productDetailTitle').textContent=p.name||'Chi tiết sản phẩm';
-    $('#productDetailContent').innerHTML=`<div class="product-detail-layout"><div class="product-detail-media">${heroImage?`<img id="productDetailHero" class="product-detail-hero" src="${escapeHTML(heroImage)}" alt="${escapeHTML(p.name)}"/>`:`<div class="product-detail-placeholder theme-${productTheme(p)}"><span>${escapeHTML(p.icon||'✦')}</span><strong>${escapeHTML(p.name)}</strong></div>`}${images.length>1?`<div class="product-gallery">${images.map((src,i)=>`<button type="button" class="gallery-thumb ${i===0?'active':''}" data-detail-image="${escapeHTML(src)}" aria-label="Xem ảnh ${i+1}"><img src="${escapeHTML(src)}" alt="Ảnh ${i+1}" loading="lazy"/></button>`).join('')}</div>`:''}</div><div class="product-detail-info"><span class="detail-category">${escapeHTML(p.category||'Sản phẩm số')}</span><h3>${escapeHTML(p.name||'Sản phẩm')}</h3><div class="detail-price"><strong>${money(p.price)}</strong>${original?`<del>${money(original)}</del><span>-${Math.round((1-Number(p.price)/original)*100)}%</span>`:''}</div><p class="detail-short">${escapeHTML(p.description||'')}</p>${p.details?`<div class="detail-long">${escapeHTML(p.details).replace(/\n/g,'<br>')}</div>`:'<p class="detail-long muted">Chi tiết sản phẩm sẽ được cập nhật từ cửa hàng.</p>'}<div class="detail-availability ${Number(p.stock)>0?'available':'unavailable'}">${Number(p.stock)>0?`● Còn ${Number(p.stock)} sản phẩm`:'● Tạm hết hàng'}</div><button class="btn btn-primary btn-block" data-detail-buy="${escapeHTML(p.id)}" ${Number(p.stock)<=0?'disabled':''}>Thêm vào giỏ hàng →</button></div></div>`;
+    $('#productDetailContent').innerHTML=`<div class="product-detail-layout"><div class="product-detail-media">${heroImage?`<img id="productDetailHero" class="product-detail-hero" src="${escapeHTML(heroImage)}" alt="${escapeHTML(p.name)}"/>`:`<div class="product-detail-placeholder theme-${productTheme(p)}"><span>${escapeHTML(p.icon||'✦')}</span><strong>${escapeHTML(p.name)}</strong></div>`}${images.length>1?`<div class="product-gallery">${images.map((src,i)=>`<button type="button" class="gallery-thumb ${i===0?'active':''}" data-detail-image="${escapeHTML(src)}" aria-label="Xem ảnh ${i+1}"><img src="${escapeHTML(src)}" alt="Ảnh ${i+1}" loading="lazy"/></button>`).join('')}</div>`:''}</div><div class="product-detail-info"><span class="detail-category">${escapeHTML(p.category||'Sản phẩm số')}</span><h3>${escapeHTML(p.name||'Sản phẩm')}</h3><div class="detail-price"><strong>${money(currentPrice)}</strong>${original?`<del>${money(original)}</del><span>-${Math.round((1-currentPrice/original)*100)}%</span>`:''}</div><p class="detail-short">${escapeHTML(p.description||'')}</p>${p.details?`<div class="detail-long">${escapeHTML(p.details).replace(/\n/g,'<br>')}</div>`:'<p class="detail-long muted">Chi tiết sản phẩm sẽ được cập nhật từ cửa hàng.</p>'}<div class="detail-availability ${Number(p.stock)>0?'available':'unavailable'}">${Number(p.stock)>0?`● Còn ${Number(p.stock)} sản phẩm`:'● Tạm hết hàng'}</div><button class="btn btn-primary btn-block" data-detail-buy="${escapeHTML(p.id)}" ${Number(p.stock)<=0?'disabled':''}>Thêm vào giỏ hàng →</button></div></div>`;
     openModal('productDetailModal');
   }
   function sortProducts(list, sort) {
-    const out=[...list]; if(sort==='priceAsc') out.sort((a,b)=>a.price-b.price); else if(sort==='priceDesc') out.sort((a,b)=>b.price-a.price); else if(sort==='name') out.sort((a,b)=>a.name.localeCompare(b.name,'vi')); else out.sort((a,b)=>(a.featured??999)-(b.featured??999)); return out;
+    const out=[...list]; if(sort==='priceAsc') out.sort((a,b)=>priceForProduct(a)-priceForProduct(b)); else if(sort==='priceDesc') out.sort((a,b)=>priceForProduct(b)-priceForProduct(a)); else if(sort==='name') out.sort((a,b)=>a.name.localeCompare(b.name,'vi')); else out.sort((a,b)=>(a.featured??999)-(b.featured??999)); return out;
   }
   function renderHome() {
     const catalogCount=$('#catalogCountBadge'); if(catalogCount) catalogCount.textContent=products().filter(p=>p.active!==false).length;
@@ -191,8 +195,8 @@
     const rows=getCartItems();const empty=rows.length===0;
     $('#cartEmpty').classList.toggle('hidden',!empty);$('#cartBottom').classList.toggle('hidden',empty);
     $('#cartItems').innerHTML=rows.map(({id,qty,product:p})=>`<div class="cart-line"><div class="cart-line-visual">${escapeHTML(p.icon||'✦')}</div><div class="cart-line-main"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · ${money(p.price)}/sp</small><div class="quantity-control"><button data-qty="${escapeHTML(id)}" data-delta="-1" aria-label="Giảm số lượng">−</button><span>${qty}</span><button data-qty="${escapeHTML(id)}" data-delta="1" aria-label="Tăng số lượng">+</button><span class="cart-line-price">${money(p.price*qty)}</span></div></div><button class="remove-item" data-remove="${escapeHTML(id)}" aria-label="Xóa sản phẩm">×</button></div>`).join('');
-    $('#cartSubtotal').textContent=money(subtotal());$('#cartTotal').textContent=money(total());$('#cartDiscount').textContent='−'+money(discountAmount());const personalPercent=Math.max(0,Number(state.currentUser?.discountPercent)||0);const hasDiscount=state.coupon||personalPercent>0;$('#discountLine').classList.toggle('hidden',!hasDiscount);const discountLabel=$('#discountLabel');if(discountLabel)discountLabel.textContent=personalPercent>0?`Ưu đãi riêng ${personalPercent}%`:(apiMode()?'Mã giảm giá':'Ưu đãi demo');
-    $('#couponNote').textContent=state.coupon?(personalPercent>0?'Tài khoản có ưu đãi riêng; mã công khai không cộng chồng.':(apiMode()?'Mã NMINH10 sẽ được máy chủ xác minh.':'Đã áp dụng ưu đãi demo 10%.')):'';
+    $('#cartSubtotal').textContent=money(subtotal());$('#cartTotal').textContent=money(total());$('#cartDiscount').textContent='−'+money(discountAmount());const wholesale=isWholesaleUser();const hasDiscount=state.coupon&&!wholesale;$('#discountLine').classList.toggle('hidden',!hasDiscount);const discountLabel=$('#discountLabel');if(discountLabel)discountLabel.textContent=apiMode()?'Mã giảm giá':'Ưu đãi demo';const couponInput=$('#couponInput');if(couponInput){couponInput.disabled=wholesale;couponInput.placeholder=wholesale?'Seller không dùng mã giảm giá':'Mã giảm giá (chỉ khách thường)';}const applyCoupon=$('#applyCoupon');if(applyCoupon)applyCoupon.disabled=wholesale;
+    $('#couponNote').textContent=wholesale?'Giá theo cấp tài khoản đã được áp dụng. Seller không thể dùng mã giảm giá.':(state.coupon?(apiMode()?'Mã NMINH10 sẽ được máy chủ xác minh.':'Đã áp dụng ưu đãi demo 10%.'):'');
     updateCartBadge();
   }
   function openCart() { renderCart();$('#overlay').classList.add('open');$('#cartDrawer').classList.add('open');$('#cartDrawer').setAttribute('aria-hidden','false');document.body.style.overflow='hidden'; }
@@ -203,7 +207,7 @@
   function openCheckout() {
     if(!state.cart.length){toast('Giỏ hàng trống','Thêm sản phẩm trước khi đặt hàng.','error');return;}
     if(apiMode() && !state.currentUser) { toast('Cần đăng nhập','Tạo tài khoản hoặc đăng nhập trước khi đặt hàng.','error'); setAuthMode('login'); openModal('authModal'); return; }
-    const items=getCartItems();$('#checkoutSummary').innerHTML=items.map(r=>`<div class="summary-line"><span>${escapeHTML(r.product.name)} × ${r.qty}</span><strong>${money(r.product.price*r.qty)}</strong></div>`).join('')+`<div class="summary-line"><span>Tạm tính</span><strong>${money(subtotal())}</strong></div>${(state.coupon||Number(state.currentUser?.discountPercent)>0)?`<div class="summary-line"><span>${Number(state.currentUser?.discountPercent)>0?`Ưu đãi riêng ${Number(state.currentUser.discountPercent)}%`:(apiMode()?'Mã giảm giá':'Ưu đãi demo')}</span><strong>−${money(discountAmount())}</strong></div>`:''}<div class="summary-line total"><span>Tổng thanh toán</span><strong>${money(total())}</strong></div>`;
+    const items=getCartItems();$('#checkoutSummary').innerHTML=items.map(r=>`<div class="summary-line"><span>${escapeHTML(r.product.name)} × ${r.qty}</span><strong>${money(r.product.price*r.qty)}</strong></div>`).join('')+`<div class="summary-line"><span>Tạm tính</span><strong>${money(subtotal())}</strong></div>${(state.coupon&&!isWholesaleUser())?`<div class="summary-line"><span>${apiMode()?'Mã giảm giá':'Ưu đãi demo'}</span><strong>−${money(discountAmount())}</strong></div>`:''}<div class="summary-line total"><span>Tổng thanh toán</span><strong>${money(total())}</strong></div>`;
     const user=state.currentUser;if(user){$('#checkoutName').value=user.name||'';$('#checkoutEmail').value=user.email||'';}
     openModal('checkoutModal');
   }
@@ -222,7 +226,7 @@
       let payment=null;
       if(apiMode()) {
         if(!state.currentUser) throw new Error('Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.');
-        const created=await apiRequest('/api/orders',{method:'POST',body:JSON.stringify({items:rows.map(r=>({productId:r.id,quantity:r.qty})),couponCode:state.coupon?($('#couponInput').value.trim().toUpperCase()||CONFIG.COUPON_DEMO):'',note:$('#checkoutNote').value.trim()})});
+        const created=await apiRequest('/api/orders',{method:'POST',body:JSON.stringify({items:rows.map(r=>({productId:r.id,quantity:r.qty})),couponCode:state.coupon&&!isWholesaleUser()?($('#couponInput').value.trim().toUpperCase()||CONFIG.COUPON_DEMO):'',note:$('#checkoutNote').value.trim()})});
         order=created.order;
         try { const pay=await apiRequest('/api/payments/create',{method:'POST',body:JSON.stringify({orderId:order.id,provider:'bank_transfer'})}); payment=pay.payment; }
         catch(payError) { toast('Đơn đã tạo, chưa có thông tin thanh toán',payError.message,'error'); }
@@ -237,7 +241,7 @@
         if(i?.configured) instructions.innerHTML=`<h3>Thông tin chuyển khoản</h3><p>Ngân hàng: <strong>${escapeHTML(i.provider)}</strong></p><p>Tên người nhận: <strong>${escapeHTML(i.accountName)}</strong></p><p>Số tài khoản: <strong>${escapeHTML(i.accountNumber)}</strong> <button type="button" class="copy-ref" data-copy="${escapeHTML(i.accountNumber)}">Sao chép</button></p><p>Số tiền: <strong>${money(i.amount)}</strong></p><p>Nội dung chuyển khoản:</p><p class="bank-ref">${escapeHTML(i.transferContent)} <button type="button" class="copy-ref" data-copy="${escapeHTML(i.transferContent)}">Sao chép</button></p><p>Hạn thanh toán: <strong>${escapeHTML(shortDate(order.expiresAt))}</strong> (30 phút từ lúc tạo đơn).</p><p>Đơn chỉ chuyển sang đã thanh toán khi backend xác minh webhook có chữ ký hợp lệ.</p><p>Nếu đã chuyển tiền sau hạn hoặc đơn đã bị hủy, hãy liên hệ quản trị viên để đối soát thủ công; không chuyển thêm tiền.</p>`;
         else instructions.innerHTML=`<h3>Chưa cấu hình tài khoản nhận tiền</h3><p>${escapeHTML(i?.message||'Đơn đã được tạo nhưng chưa có thông tin thanh toán.')}</p><p>Đừng chuyển tiền cho đến khi cửa hàng hiển thị tài khoản chính thức.</p>`;
       } else {
-        instructions.innerHTML=`<h3>Thông tin chuyển khoản mẫu</h3><p>Ngân hàng: <strong>CHƯA CẤU HÌNH</strong></p><p>Tên người nhận: <strong>nminhios shop (DEMO)</strong></p><p>Số tài khoản: <strong>0000 0000 0000</strong> <button type="button" class="copy-ref" data-copy="0000000000">Sao chép</button></p><p>Số tiền: <strong>${money(order.total)}</strong></p><p>Nội dung chuyển khoản:</p><p class="bank-ref">${escapeHTML(order.id)} <button type="button" class="copy-ref" data-copy="${escapeHTML(order.id)}">Sao chép</button></p><p>Đây là dữ liệu giả lập. Đừng chuyển tiền thật vào thông tin mẫu này.</p>`;
+        instructions.innerHTML=`<h3>Thông tin chuyển khoản mẫu</h3><p>Ngân hàng: <strong>CHƯA CẤU HÌNH</strong></p><p>Tên người nhận: <strong>nminhios store (DEMO)</strong></p><p>Số tài khoản: <strong>0000 0000 0000</strong> <button type="button" class="copy-ref" data-copy="0000000000">Sao chép</button></p><p>Số tiền: <strong>${money(order.total)}</strong></p><p>Nội dung chuyển khoản:</p><p class="bank-ref">${escapeHTML(order.id)} <button type="button" class="copy-ref" data-copy="${escapeHTML(order.id)}">Sao chép</button></p><p>Đây là dữ liệu giả lập. Đừng chuyển tiền thật vào thông tin mẫu này.</p>`;
       }
       $('#successOrderDetails').innerHTML=`<div class="success-details"><div class="summary-line"><span>Mã đơn hàng</span><strong>${escapeHTML(order.id)}</strong></div><div class="summary-line"><span>Thời gian</span><strong>${shortDate(order.createdAt)}</strong></div><div class="summary-line"><span>Sản phẩm</span><strong>${order.items.length} mặt hàng</strong></div><div class="summary-line"><span>Trạng thái</span><strong><span class="status-pill ${statusClass(order.status)}">${statusText(order.status)}</span></strong></div><div class="summary-line total"><span>Tổng cộng</span><strong>${money(order.total)}</strong></div></div>`;
       state.cart=[];state.coupon=false;storeCart();
@@ -274,98 +278,46 @@
   function renderAdminUsers() {
     const wrap=$('#adminUsersList'); if(!wrap)return;
     const list=apiMode()?state.remoteUsers:profiles();
-    if(!list.length){wrap.innerHTML='<div class="empty-table"><strong>Chưa có tài khoản khách hàng</strong><p>Hãy mở nút Tài khoản ở góc trên, chọn Tạo tài khoản để tạo một người dùng thử. Sau đó quay lại đây để nâng quyền Seller và đặt ưu đãi.</p></div>';return;}
+    if(!list.length){wrap.innerHTML='<div class="empty-table"><strong>Chưa có tài khoản khách hàng</strong><p>Tạo tài khoản thử tại nút Tài khoản, sau đó cấp cấp giá tại đây.</p></div>';return;}
     wrap.innerHTML=list.map(u=>{
-      const isSeller=apiMode()?Boolean(u.isSeller||u.role==='seller'):Boolean(u.isSeller||u.role==='seller');
-      const percent=Math.max(0,Math.min(90,Number(u.discountPercent)||0));
-      const roleLabel=u.role==='admin'?'Quản trị viên':(isSeller?'Seller':'Khách hàng');
+      const tier=String(u.sellerTier||((u.isSeller||u.role==='seller')?'seller':'customer'));
+      const label=u.role==='admin'?'Quản trị viên':sellerTierLabel(tier);
       const initial=(u.name||u.email||'U').trim().slice(0,1).toUpperCase();
-      return `<div class="managed-user-row" data-user-row="${escapeHTML(u.id)}"><div class="managed-user-identity"><span class="managed-avatar">${escapeHTML(initial)}</span><div><strong>${escapeHTML(u.name||'Người dùng')}</strong><small>${escapeHTML(u.email||'')} · Tham gia ${escapeHTML(shortDate(u.createdAt||new Date().toISOString()))}</small></div></div><div class="managed-user-role"><label>Vai trò<select data-user-role="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}><option value="customer" ${!isSeller&&u.role!=='admin'?'selected':''}>Khách hàng</option><option value="seller" ${isSeller?'selected':''}>Seller</option><option value="admin" disabled>Quản trị viên</option></select></label></div><div class="managed-user-discount"><label>Giảm riêng (%)<input type="number" min="0" max="90" step="1" value="${percent}" data-user-discount="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}/></label></div><div class="managed-user-actions"><span class="role-chip ${u.role==='admin'?'role-admin':isSeller?'role-seller':'role-customer'}">${roleLabel}</span><button class="btn btn-primary btn-small" data-save-user="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}>Lưu thay đổi</button></div></div>`;
+      return `<div class="managed-user-row" data-user-row="${escapeHTML(u.id)}"><div class="managed-user-identity"><span class="managed-avatar">${escapeHTML(initial)}</span><div><strong>${escapeHTML(u.name||'Người dùng')}</strong><small>${escapeHTML(u.email||'')} · Tham gia ${escapeHTML(shortDate(u.createdAt||new Date().toISOString()))}</small></div></div><div class="managed-user-role"><label>Cấp giá<select data-user-tier="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}><option value="customer" ${tier==='customer'?'selected':''}>Khách hàng thường</option><option value="seller" ${tier==='seller'?'selected':''}>Seller thường</option><option value="seller_vip" ${tier==='seller_vip'?'selected':''}>Seller VIP</option><option value="seller_super_vip" ${tier==='seller_super_vip'?'selected':''}>Seller Super VIP</option></select></label></div><div class="managed-user-actions"><span class="role-chip ${u.role==='admin'?'role-admin':tier!=='customer'?'role-seller':'role-customer'}">${escapeHTML(label)}</span><button class="btn btn-primary btn-small" data-save-user="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}>Lưu cấp</button></div></div>`;
     }).join('');
   }
   async function saveUserPermissions(id) {
     const row=$(`[data-user-row="${CSS.escape(id)}"]`); if(!row)return;
-    const isSeller=$(`[data-user-role="${CSS.escape(id)}"]`,row)?.value==='seller';
-    const discountPercent=Number($(`[data-user-discount="${CSS.escape(id)}"]`,row)?.value);
-    if(!Number.isInteger(discountPercent)||discountPercent<0||discountPercent>90){toast('Mức giảm giá không hợp lệ','Nhập số nguyên từ 0 đến 90%.','error');return;}
+    const sellerTier=$(`[data-user-tier="${CSS.escape(id)}"]`,row)?.value||'customer';
+    if(!['customer','seller','seller_vip','seller_super_vip'].includes(sellerTier)){toast('Cấp tài khoản không hợp lệ','Chọn một cấp tài khoản trong danh sách.','error');return;}
     if(apiMode()) {
-      try { const result=await apiRequest(`/api/admin/users/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({isSeller,discountPercent})});state.remoteUsers=state.remoteUsers.map(u=>u.id===id?result.user:u);renderAdminUsers();if(state.currentUser?.id===id){state.currentUser={...state.currentUser,...result.user};updateProfileUI();}toast('Đã cập nhật tài khoản',`${result.user.name}: ${result.user.role}, ưu đãi ${result.user.discountPercent}%.`); }
+      try { const result=await apiRequest(`/api/admin/users/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({sellerTier})});state.remoteUsers=state.remoteUsers.map(u=>u.id===id?result.user:u);renderAdminUsers();if(state.currentUser?.id===id){state.currentUser={...state.currentUser,...result.user};updateProfileUI();renderCart();}toast('Đã cập nhật cấp tài khoản',`${result.user.name}: ${sellerTierLabel(result.user.sellerTier)}.`); }
       catch(err){toast('Không lưu được quyền',err.message,'error');}
       return;
     }
     const list=profiles(),idx=list.findIndex(u=>u.id===id);if(idx<0){toast('Không tìm thấy hồ sơ','Tài khoản demo có thể đã bị xóa khỏi bộ nhớ trình duyệt.','error');return;}
-    list[idx]={...list[idx],isSeller,role:isSeller?'seller':'customer',discountPercent};saveProfiles(list);
-    if(state.currentUser?.id===id){state.currentUser={...state.currentUser,isSeller,role:isSeller?'seller':'customer',discountPercent};writeJSON(STORAGE.session,state.currentUser);updateProfileUI();if(state.view==='seller')renderSeller();}
-    renderAdminUsers();toast('Đã cập nhật hồ sơ demo',`${list[idx].name}: ${isSeller?'Seller':'Khách hàng'}, ưu đãi ${discountPercent}%.`);
+    list[idx]={...list[idx],sellerTier,isSeller:sellerTier!=='customer',role:sellerTier!=='customer'?'seller':'customer',discountPercent:0};saveProfiles(list);
+    if(state.currentUser?.id===id){state.currentUser={...state.currentUser,...list[idx]};writeJSON(STORAGE.session,state.currentUser);updateProfileUI();renderCart();if(state.view==='seller')renderSeller();}
+    renderAdminUsers();toast('Đã cập nhật cấp tài khoản',`${list[idx].name}: ${sellerTierLabel(sellerTier)}.`);
   }
   function renderSellerProducts() {
-    const wrap=$('#sellerProductsList');if(!wrap)return;
-    const items=apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id);
+    const wrap=$('#sellerProductsList'); if(!wrap)return;
+    const tier=currentSellerTier();
+    const items=products().filter(p=>p.active!==false);
     $('#sellerProductCount').textContent=String(items.length);
-    wrap.innerHTML=items.length?items.map(p=>`<div class="seller-product-row"><div class="seller-product-thumb">${safeImageUrl(p.imageUrl)?`<img src="${escapeHTML(safeImageUrl(p.imageUrl))}" alt="" loading="lazy"/>`:''}</div><div class="seller-product-copy"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · ${Number(p.stock)||0} trong kho · ${p.active===false?'Đang ẩn':'Đang bán'}</small></div><div class="seller-product-price"><strong>${money(p.price)}</strong>${Number(p.originalPrice)>Number(p.price)?`<del>${money(p.originalPrice)}</del>`:''}</div><div class="seller-product-actions"><button class="mini-action" data-seller-edit="${escapeHTML(p.id)}">Sửa</button><button class="mini-action danger" data-seller-delete="${escapeHTML(p.id)}">Ẩn</button></div></div>`).join(''):'<div class="empty-table"><strong>Bạn chưa đăng sản phẩm</strong><p>Nhấn “Thêm sản phẩm” để tạo listing đầu tiên của shop.</p></div>';
+    wrap.innerHTML=items.length?`<div class="wholesale-price-list">${items.map(p=>`<div class="seller-product-row"><div class="seller-product-thumb">${safeImageUrl(p.imageUrl)?`<img src="${escapeHTML(safeImageUrl(p.imageUrl))}" alt="" loading="lazy"/>`:escapeHTML(p.icon||'✦')}</div><div class="seller-product-copy"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · ${Number(p.stock)||0} còn hàng</small></div><div class="seller-product-price"><strong>${money(priceForProduct(p))}</strong><small>${escapeHTML(sellerTierLabel(tier))}</small></div><button class="mini-action" data-view="shop">Xem</button></div>`).join('')}</div>`:'<div class="empty-table">Chưa có sản phẩm đang bán.</div>';
   }
   async function renderSeller() {
     const user=state.currentUser;
-    if(!user){$('#sellerProductsList').innerHTML='<div class="empty-table">Đăng nhập trước để mở kênh Seller.</div>';$('#sellerAddProduct').disabled=true;return;}
-    const allowed=user.role==='seller'||user.isSeller;
-    $('#sellerWelcome').textContent=allowed?`Xin chào, ${user.name||'Seller'}`:'Chưa được cấp quyền Seller';
-    $('#sellerDescription').textContent=allowed?'Bạn có thể đăng sản phẩm và chỉnh sửa các listing do chính tài khoản này tạo.':'Hãy tạo tài khoản, sau đó tài khoản quản trị vào “Khách hàng & Seller” để cấp quyền Seller.';
-    $('#sellerAddProduct').disabled=!allowed;
-    if(!allowed){$('#sellerProductsList').innerHTML='<div class="seller-locked"><strong>Kênh Seller đang khóa</strong><p>Quyền này chỉ được cấp bởi quản trị viên. Bản demo có thể thử ngay tại mục Quản trị cửa hàng.</p><button class="btn btn-ghost btn-small" data-view="admin">Mở quản trị demo</button></div>';return;}
-    if(apiMode()) {try{const data=await apiRequest('/api/seller/products');state.sellerProducts=data.items||[];}catch(err){$('#sellerProductsList').innerHTML=`<div class="empty-table">${escapeHTML(err.message)}</div>`;return;}}
+    if(!user){$('#sellerProductsList').innerHTML='<div class="empty-table">Đăng nhập để xem bảng giá theo cấp tài khoản.</div>';$('#sellerAddProduct')?.remove();return;}
+    const tier=currentSellerTier(user);
+    $('#sellerWelcome').textContent=`Xin chào, ${user.name||'thành viên'}`;
+    $('#sellerDescription').textContent=tier==='customer'?'Tài khoản hiện ở mức khách hàng thường. Quản trị viên có thể nâng cấp lên một trong các cấp Seller.':'Bạn đang sử dụng bảng giá ưu đãi của '+sellerTierLabel(tier)+'. Bạn mua hàng như khách hàng sỉ, không đăng hoặc sửa sản phẩm.';
+    $('#sellerDiscountBadge').textContent=sellerTierLabel(tier);
+    const add=$('#sellerAddProduct'); if(add){add.disabled=true;add.classList.add('hidden');}
+    const form=$('#sellerProductForm');if(form)form.classList.add('hidden');
+    if(apiMode()) { try { const data=await apiRequest('/api/products');state.remoteProducts=(data.items||[]); } catch(e) { /* catalog will show the latest loaded data */ } }
     renderSellerProducts();
-  }
-  function openSellerEditor(product=null) {
-    const user=state.currentUser;if(!user||(user.role!=='seller'&&!user.isSeller)){toast('Chưa có quyền Seller','Quản trị viên cần cấp quyền này trước.','error');return;}
-    state.editingSellerProductId=product?.id||null;
-    $('#sellerFormTitle').textContent=product?'Chỉnh sửa sản phẩm':'Đăng sản phẩm mới';$('#sellerEditProductId').value=product?.id||'';
-    $('#sellerPName').value=product?.name||'';$('#sellerPCategory').value=product?.category||'Menu Key';$('#sellerPPrice').value=product?.price??'';$('#sellerPOriginalPrice').value=product?.originalPrice??'';$('#sellerPStock').value=product?.storedStock??product?.stock??10;$('#sellerPActive').value=product?.active===false?'false':'true';$('#sellerPImageUrl').value=product?.imageUrl||'';$('#sellerPGalleryUrls').value=productGallery(product).join('\n');$('#sellerPDescription').value=product?.description||'';$('#sellerPDetails').value=product?.details||'';$('#sellerPBadge').value=product?.badge||'';$('#sellerPTheme').value=product?.theme||'blue';
-    renderSellerImagePreview();$('#sellerProductForm').classList.remove('hidden');$('#sellerProductForm').scrollIntoView({behavior:'smooth',block:'start'});
-  }
-  function renderSellerImagePreview() {
-    const wrap=$('#sellerImagePreview');if(!wrap)return;
-    const main=safeImageUrl($('#sellerPImageUrl').value),gallery=$('#sellerPGalleryUrls').value.split(/\r?\n/).map(safeImageUrl).filter(Boolean).slice(0,5),images=[...new Set([main,...gallery].filter(Boolean))];
-    wrap.innerHTML=images.length?images.map((src,i)=>`<div class="editor-preview-item"><img src="${escapeHTML(src)}" alt="Ảnh xem trước ${i+1}" loading="lazy"/><small>${i===0&&src===main?'Ảnh bìa':`Ảnh mô tả ${i}`}</small></div>`).join(''):'<span>Dán URL ảnh HTTPS để xem trước hình sản phẩm.</span>';
-  }
-  async function saveSellerProduct(e) {
-    e.preventDefault();const id=state.editingSellerProductId,name=$('#sellerPName').value.trim(),price=Number($('#sellerPPrice').value),rawOrig=$('#sellerPOriginalPrice').value.trim(),originalPrice=rawOrig===''?null:Number(rawOrig),stock=Number($('#sellerPStock').value),imageUrl=$('#sellerPImageUrl').value.trim(),galleryImages=$('#sellerPGalleryUrls').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-    const validHttps=x=>{try{return new URL(x).protocol==='https:';}catch(_){return false;}};
-    if(name.length<2||!Number.isSafeInteger(price)||price<0||!Number.isSafeInteger(stock)||stock<0){toast('Dữ liệu chưa hợp lệ','Tên, giá và tồn kho cần là giá trị hợp lệ.','error');return;}
-    if(originalPrice!==null&&(!Number.isSafeInteger(originalPrice)||originalPrice<=price)){toast('Giá gốc chưa hợp lệ','Giá gốc cần cao hơn giá bán.','error');return;}
-    if(imageUrl&&!validHttps(imageUrl)){toast('URL ảnh chưa hợp lệ','Dùng đường dẫn HTTPS trực tiếp.','error');return;}
-    if(galleryImages.length>5||galleryImages.some(x=>!validHttps(x))){toast('Thư viện ảnh chưa hợp lệ','Tối đa 5 ảnh mô tả, mỗi ảnh dùng URL HTTPS riêng.','error');return;}
-    const old=(apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id)).find(p=>p.id===id);
-    const item={id:id||`seller-${makeId('P').toLowerCase()}`,name,category:$('#sellerPCategory').value,price,originalPrice,stock,imageUrl,galleryImages,description:$('#sellerPDescription').value.trim(),details:$('#sellerPDetails').value.trim(),badge:$('#sellerPBadge').value.trim()||'SELLER',icon:'',theme:$('#sellerPTheme').value,featured:old?.featured??(products().length+1),deliveryMode:'manual',active:$('#sellerPActive').value==='true'};
-    try {
-      if(apiMode()){await apiRequest(id?`/api/seller/products/${encodeURIComponent(id)}`:'/api/seller/products',{method:id?'PUT':'POST',body:JSON.stringify(item)});await loadServerCatalog(false);const own=await apiRequest('/api/seller/products');state.sellerProducts=own.items||[];}
-      else {const list=products(),idx=list.findIndex(p=>p.id===id);item.ownerId=state.currentUser.id;if(idx>=0)list[idx]={...list[idx],...item};else list.push(item);saveProducts(list);}
-      $('#sellerProductForm').classList.add('hidden');renderSellerProducts();renderHome();renderShop();toast(id?'Đã cập nhật sản phẩm':'Đã đăng sản phẩm',name);
-    } catch(err){toast('Không lưu được sản phẩm',err.message,'error');}
-  }
-
-  function renderAdmin() {
-    $('#apiBaseUrl').value=currentApiBase() || (apiMode()?window.location.origin:'');
-    if(!apiMode()) { const title=$('#admin-warning-title'),copy=$('#admin-warning-copy'); if(title)title.textContent='ADMIN DEMO · DỮ LIỆU CHỈ Ở TRÌNH DUYỆT NÀY'; if(copy)copy.textContent='Bạn đang ở chế độ thử: có thể thêm/sửa sản phẩm, tạo hồ sơ khách hàng, nâng quyền seller và đặt giảm giá riêng. Các thay đổi demo chỉ lưu trên thiết bị này.'; }
-    if(apiMode()) { refreshAdminData(); return; }
-    renderAdminProducts(); renderAdminOrders(); renderAdminUsers();
-  }
-  async function refreshAdminData() {
-    if(!apiMode()) { renderAdminProducts();renderAdminOrders();renderAdminUsers();return; }
-    if(state.currentUser?.role!=='admin') {
-      $('#adminProductsList').innerHTML='<div class="empty-table">Đăng nhập bằng tài khoản quản trị để xem dữ liệu này.</div>';
-      $('#adminOrdersList').innerHTML='<div class="empty-table">Khu quản trị được bảo vệ ở máy chủ.</div>';
-      if($('#adminUsersList'))$('#adminUsersList').innerHTML='<div class="empty-table">Đăng nhập bằng email admin đã khai báo trong .env để quản lý khách hàng, seller và ưu đãi.</div>';
-      const copy=$('#admin-warning-copy');if(copy)copy.textContent='Quyền quản trị được kiểm tra ở backend. Đăng nhập bằng email quản trị đã cấu hình khi cài đặt máy chủ.';
-      $('#productForm').classList.add('hidden');
-      return;
-    }
-    try {
-      const [p,o,u]=await Promise.all([apiRequest('/api/admin/products'),apiRequest('/api/admin/orders'),apiRequest('/api/admin/users')]);
-      state.remoteProducts=Array.isArray(p.items)?p.items:[];
-      state.remoteAdminOrders=Array.isArray(o.items)?o.items:[];
-      state.remoteUsers=Array.isArray(u.items)?u.items:[];
-      renderAdminProducts();renderAdminOrders();renderAdminUsers();renderHome();renderShop();await loadInventoryStats();
-    } catch(err) { toast('Không tải được dữ liệu quản trị',err.message,'error'); }
   }
   function renderAdminProducts() {
     const list=products();$('#adminProductsList').innerHTML=list.length?list.map(p=>`<div class="admin-product-row"><div class="admin-product-icon">${safeImageUrl(p.imageUrl)?`<img src="${escapeHTML(safeImageUrl(p.imageUrl))}" alt="" loading="lazy"/>`:escapeHTML(p.icon||'✦')}</div><div class="admin-product-name"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · Kho: ${Number(p.stock)||0}${p.active===false?' · Đã ẩn':''}${p.imageUrl?' · Có ảnh':''}</small></div><div class="admin-product-price">${money(p.price)}${Number(p.originalPrice)>Number(p.price)?`<small><del>${money(p.originalPrice)}</del></small>`:''}</div><div class="admin-row-actions"><button class="mini-action" data-edit-product="${escapeHTML(p.id)}">Sửa</button><button class="mini-action danger" data-delete-product="${escapeHTML(p.id)}">${p.active===false?'Đã ẩn':'Ngừng bán'}</button></div></div>`).join(''):'<div class="empty-table">Chưa có sản phẩm.</div>';
@@ -378,7 +330,7 @@
     if(apiMode() && state.currentUser?.role!=='admin') { toast('Không có quyền','Chỉ tài khoản quản trị mới sửa được sản phẩm.','error');return; }
     state.editingProductId=product?.id||null;
     $('#productFormTitle').textContent=product?'Chỉnh sửa sản phẩm':'Thêm sản phẩm';$('#editProductId').value=product?.id||'';
-    $('#pName').value=product?.name||'';$('#pCategory').value=product?.category||'Menu Key';$('#pPrice').value=product?.price??'';$('#pOriginalPrice').value=product?.originalPrice??'';$('#pStock').value=product?.storedStock??product?.stock??99;
+    $('#pName').value=product?.name||'';$('#pCategory').value=product?.category||'Menu Key';$('#pPrice').value=product?.price??'';$('#pOriginalPrice').value=product?.originalPrice??'';$('#pStock').value=product?.storedStock??product?.stock??99;const tierPrices=product?.tierPrices||{};for(const [id,key] of [['pPriceSeller','seller'],['pPriceSellerVip','seller_vip'],['pPriceSellerSuperVip','seller_super_vip']]){const input=$('#'+id);if(input)input.value=tierPrices[key]??product?.price??'';}
     $('#pIcon').value=product?.icon||'✦';$('#pBadge').value=product?.badge||'';$('#pDescription').value=product?.description||'';$('#pDetails').value=product?.details||'';$('#pImageUrl').value=product?.imageUrl||'';$('#pGalleryUrls').value=productGallery(product).join('\n');
     if($('#pDeliveryMode'))$('#pDeliveryMode').value=product?.deliveryMode||'manual';if($('#pActive'))$('#pActive').value=product?.active===false?'false':'true';
     renderProductImagePreview();$('#productForm').classList.remove('hidden');$('#productForm').scrollIntoView({behavior:'smooth',block:'nearest'});$('#pName').focus({preventScroll:true});
@@ -401,7 +353,7 @@
     if(galleryImages.length>5){toast('Quá nhiều ảnh','Mỗi sản phẩm có thể có tối đa 5 ảnh mô tả.','error');return;}
     if(galleryImages.some(x=>!validHttps(x))){toast('Link ảnh mô tả chưa hợp lệ','Mỗi ảnh mô tả cần một URL HTTPS riêng trên một dòng.','error');return;}
     const id=state.editingProductId||`custom-${Date.now().toString(36)}`;const existing=products().find(p=>p.id===id);
-    const item={id,name,category:$('#pCategory').value,price:Math.round(price),originalPrice,stock,icon:$('#pIcon').value.trim()||'✦',badge:$('#pBadge').value.trim()||'DIGITAL',description:$('#pDescription').value.trim(),details:$('#pDetails').value.trim(),imageUrl,galleryImages,featured:existing?.featured??(products().length+1),theme:existing?.theme||(['Acc Clone'].includes($('#pCategory').value)?'orange':$('#pCategory').value==='Acc Game'?'violet':$('#pCategory').value==='Dịch vụ số'?'green':'blue'),deliveryMode:$('#pDeliveryMode')?.value||'manual',active:$('#pActive')?$('#pActive').value==='true':existing?.active!==false};
+    const tierPrices={customer:Math.round(price),seller:$('#pPriceSeller')?.value.trim()===''||!$('#pPriceSeller')?Math.round(price):Number($('#pPriceSeller').value),seller_vip:$('#pPriceSellerVip')?.value.trim()===''||!$('#pPriceSellerVip')?Math.round(price):Number($('#pPriceSellerVip').value),seller_super_vip:$('#pPriceSellerSuperVip')?.value.trim()===''||!$('#pPriceSellerSuperVip')?Math.round(price):Number($('#pPriceSellerSuperVip').value)};if(Object.values(tierPrices).some(v=>!Number.isSafeInteger(v)||v<0)){toast('Giá cấp tài khoản chưa hợp lệ','Tất cả bảng giá phải là số nguyên không âm.','error');return;}const item={id,name,category:$('#pCategory').value,price:Math.round(price),tierPrices,originalPrice,stock,icon:$('#pIcon').value.trim()||'✦',badge:$('#pBadge').value.trim()||'DIGITAL',description:$('#pDescription').value.trim(),details:$('#pDetails').value.trim(),imageUrl,galleryImages,featured:existing?.featured??(products().length+1),theme:existing?.theme||(['Acc Clone'].includes($('#pCategory').value)?'orange':$('#pCategory').value==='Acc Game'?'violet':$('#pCategory').value==='Dịch vụ số'?'green':'blue'),deliveryMode:$('#pDeliveryMode')?.value||'manual',active:$('#pActive')?$('#pActive').value==='true':existing?.active!==false};
     if(apiMode()) {
       try { const route=state.editingProductId?`/api/admin/products/${encodeURIComponent(id)}`:'/api/admin/products'; await apiRequest(route,{method:state.editingProductId?'PUT':'POST',body:JSON.stringify(item)}); $('#productForm').classList.add('hidden');await refreshAdminData();toast(state.editingProductId?'Đã cập nhật sản phẩm':'Đã thêm sản phẩm',name); }
       catch(err) { toast('Không lưu được sản phẩm',err.message,'error'); }
@@ -419,8 +371,8 @@
     const bottomLabel=$('#bottomProfileLabel');if(bottomLabel)bottomLabel.textContent=label.length>10?label.slice(0,9)+'…':label;
     const bottomAvatar=$('#bottomAvatar');if(bottomAvatar)bottomAvatar.innerHTML=avatarMarkup;
     const sellerNav=$('#sellerNavItem');if(sellerNav)sellerNav.classList.toggle('hidden',!(u&&(u.role==='seller'||u.isSeller)));
-    const discountBadge=$('#sellerDiscountBadge');if(discountBadge)discountBadge.textContent=`Ưu đãi tài khoản: ${Math.max(0,Number(u?.discountPercent)||0)}%`;
-    const discountHint=$('#personalDiscountHint');if(discountHint)discountHint.textContent=(Number(u?.discountPercent)||0)>0?`Tài khoản của bạn đang có ưu đãi riêng ${u.discountPercent}%. Ưu đãi riêng được ưu tiên thay cho mã công khai.`:'';
+    const discountBadge=$('#sellerDiscountBadge');if(discountBadge)discountBadge.textContent=sellerTierLabel(currentSellerTier(u));
+    const discountHint=$('#personalDiscountHint');if(discountHint)discountHint.textContent=isWholesaleUser(u)?`Bảng giá ${sellerTierLabel(currentSellerTier(u))} đang được áp dụng. Seller không sử dụng mã giảm giá.`:'';
   }
 
   function restoreSession() {if(apiMode())return;const sess=readJSON(STORAGE.session,null);if(sess?.email){state.currentUser=sess;}}
@@ -440,9 +392,9 @@
     let list=profiles();let user=list.find(x=>x.email===email);
     if(state.authMode==='register'){
       if(!name){toast('Thiếu tên hiển thị','Nhập tên để tạo hồ sơ.','error');return;}if(user){toast('Email đã có hồ sơ','Hãy dùng email khác hoặc chuyển sang đăng nhập.','error');return;}
-      user={id:makeId('USER'),name,email,createdAt:new Date().toISOString(),isSeller:false,discountPercent:0};list.push(user);saveProfiles(list);toast('Tạo hồ sơ demo thành công','Chưa tạo tài khoản xác thực trên máy chủ.');
+      user={id:makeId('USER'),name,email,createdAt:new Date().toISOString(),isSeller:false,sellerTier:'customer',discountPercent:0};list.push(user);saveProfiles(list);toast('Tạo hồ sơ demo thành công','Chưa tạo tài khoản xác thực trên máy chủ.');
     } else if(!user) {toast('Chưa có hồ sơ demo','Chuyển sang Tạo tài khoản để tạo hồ sơ thử nghiệm.','error');return;}
-    state.currentUser={id:user.id,name:user.name,email:user.email,demo:true,isSeller:Boolean(user.isSeller),role:user.isSeller?'seller':'customer',discountPercent:Number(user.discountPercent)||0};
+    state.currentUser={id:user.id,name:user.name,email:user.email,demo:true,isSeller:Boolean(user.isSeller),sellerTier:user.sellerTier||((user.isSeller)?'seller':'customer'),role:(user.sellerTier&&user.sellerTier!=='customer')||user.isSeller?'seller':'customer'};
     if($('#rememberMe').checked)writeJSON(STORAGE.session,state.currentUser);else {try{localStorage.removeItem(STORAGE.session);}catch(_){}}
     updateProfileUI();closeModal('authModal');if(state.view==='orders')renderOrders();toast('Đã vào phiên demo',`Xin chào ${user.name}.`);
   }
@@ -488,7 +440,7 @@
     $('#noticeButton').addEventListener('click',()=>toast('Thông báo',apiMode()?'Bạn sẽ thấy các cập nhật đơn hàng tại mục Đơn hàng của tôi. Tích hợp email/push cần nhà cung cấp riêng.':'Đây là bản demo. Tích hợp thông báo đơn hàng sau khi kết nối backend.'));
     $('#openCart').addEventListener('click',openCart);$('#closeCart').addEventListener('click',closeCart);$('#overlay').addEventListener('click',closeCart);
     $('#startCheckout').addEventListener('click',openCheckout);$('#checkoutForm').addEventListener('submit',createOrderFromForm);
-    $('#applyCoupon').addEventListener('click',()=>{const code=$('#couponInput').value.trim().toUpperCase();if(code===String(CONFIG.COUPON_DEMO||'NMINH10').toUpperCase()){state.coupon=true;renderCart();toast('Đã áp dụng mã',apiMode()?'Mã sẽ được máy chủ kiểm tra lại khi tạo đơn.':'Giảm 10% tạm tính trong bản thử nghiệm.');}else{state.coupon=false;renderCart();$('#couponNote').textContent='Mã không hợp lệ trong bản demo.';$('#couponNote').style.color='var(--danger)';toast('Mã giảm giá không đúng','Thử mã NMINH10 trong bản demo.','error');}});
+    $('#applyCoupon').addEventListener('click',()=>{if(isWholesaleUser()){state.coupon=false;renderCart();toast('Seller không dùng mã giảm giá','Giá theo cấp tài khoản đã được áp dụng.','error');return;}const code=$('#couponInput').value.trim().toUpperCase();if(code===String(CONFIG.COUPON_DEMO||'NMINH10').toUpperCase()){state.coupon=true;renderCart();toast('Đã áp dụng mã',apiMode()?'Mã sẽ được máy chủ kiểm tra lại khi tạo đơn.':'Giảm 10% tạm tính trong bản thử nghiệm.');}else{state.coupon=false;renderCart();$('#couponNote').textContent='Mã không hợp lệ trong bản demo.';$('#couponNote').style.color='var(--danger)';toast('Mã giảm giá không đúng','Thử mã NMINH10 trong bản demo.','error');}});
     $('.search-box').addEventListener('click',e=>{if(window.matchMedia('(max-width: 850px)').matches && e.target.id!=='globalSearch'){const input=$('#globalSearch');$('.search-box').classList.add('search-open');input.focus({preventScroll:true});}});
     $('#globalSearch').addEventListener('blur',()=>$('.search-box').classList.remove('search-open'));
     $('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){state.shopSearch=e.target.value;state.category='Tất cả';goView('shop');renderShop();e.target.blur();}});
