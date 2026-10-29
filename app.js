@@ -16,7 +16,7 @@
     { id:'service-vip', name:'Dịch vụ VIP 30 ngày', category:'Dịch vụ số', price:125000, stock:40, icon:'✧', badge:'VIP', description:'Dịch vụ số • Chi tiết sẽ tùy chỉnh trong trang quản trị', featured:9, theme:'violet' },
     { id:'key-trial', name:'Menu Test 3 ngày', category:'Menu Key', price:75000, stock:75, icon:'◉', badge:'MỚI', description:'Gói dùng thử 3 ngày • Key là dữ liệu demo', featured:10, theme:'blue' }
   ];
-  const state = { view:'home', category:'Tất cả', cart:[], coupon:false, currentUser:null, selectedOrderId:null, shopSearch:'', shopSort:'featured', homeSort:'featured', authMode:'login', editingProductId:null, remoteProducts:[], remoteOrders:[], remoteAdminOrders:[], apiReady:false };
+  const state = { view:'home', category:'Tất cả', cart:[], coupon:false, currentUser:null, selectedOrderId:null, shopSearch:'', shopSort:'featured', homeSort:'featured', authMode:'login', editingProductId:null, editingSellerProductId:null, remoteProducts:[], remoteOrders:[], remoteAdminOrders:[], remoteUsers:[], sellerProducts:[], apiReady:false };
 
   function readJSON(key, fallback) { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
   function writeJSON(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (_) { toast('Không thể lưu dữ liệu', 'Bộ nhớ trình duyệt có thể đã đầy hoặc bị chặn.', 'error'); return false; } }
@@ -41,7 +41,7 @@
   function currentApiBase() { return (readJSON(STORAGE.api, '') || CONFIG.API_BASE_URL || '').replace(/\/+$/,''); }
   function getCartItems() { const catalog=products(); return state.cart.map(row=>({ ...row, product:catalog.find(p=>p.id===row.id) })).filter(row=>row.product); }
   function subtotal() { return getCartItems().reduce((s,row)=>s + Math.max(0,Number(row.product.price)||0) * row.qty,0); }
-  function discountAmount() { return state.coupon ? Math.round(subtotal() * Number(CONFIG.DEMO_DISCOUNT_RATE || .1)) : 0; }
+  function discountAmount() { const personal=Math.max(0,Math.min(90,Number(state.currentUser?.discountPercent)||0)); const rate=personal>0?personal/100:(state.coupon?Number(CONFIG.DEMO_DISCOUNT_RATE||.1):0); return Math.round(subtotal()*rate); }
   function total() { return Math.max(0,subtotal()-discountAmount()); }
 
   async function apiRequest(path, options={}) {
@@ -94,11 +94,11 @@
     $$('.view').forEach(el=>el.classList.toggle('active',el.id===`view-${view}`));
     $$('.nav-item[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
     $$('.bottom-nav-item[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
-    const titles={home:'Tổng quan',shop:'Cửa hàng',orders:'Đơn hàng của tôi',track:'Tra cứu đơn',help:'Trợ giúp',admin:'Quản trị cửa hàng'};
+    const titles={home:'Tổng quan',shop:'Cửa hàng',orders:'Đơn hàng của tôi',track:'Tra cứu đơn',help:'Trợ giúp',admin:'Quản trị cửa hàng',seller:'Kênh Seller'};
     $('#crumbCurrent').textContent=titles[view]||'Tổng quan';
     $('#sidebar').classList.remove('mobile-open');
     window.scrollTo({top:0,behavior:'smooth'});
-    if(view==='shop') renderShop(); if(view==='orders') renderOrders(); if(view==='admin') renderAdmin();
+    if(view==='shop') renderShop(); if(view==='orders') renderOrders(); if(view==='admin') renderAdmin(); if(view==='seller') renderSeller();
   }
   function setCategory(category) {
     state.category=category||'Tất cả';
@@ -118,7 +118,7 @@
     const badgeClass=p.theme==='violet'?'badge-violet':p.theme==='orange'?'badge-orange':'';
     const title=String(p.name||'Sản phẩm số');
     const shortTitle=title.length>30?title.slice(0,28).trim()+'…':title;
-    const emblem=String(p.icon||'✦');
+    const emblem=p.category==='Menu Key'?'KEY':(p.category==='Acc Clone'?'ACC':(p.category==='Acc Game'?'PLAY':'PRO'));
     const posterLabel=p.category==='Menu Key'?'PREMIUM MENU':p.category==='Acc Clone'?'DIGITAL ACCOUNT':p.category==='Acc Game'?'GAMING ACCESS':'DIGITAL SERVICE';
     const artName=escapeHTML(shortTitle.toLocaleUpperCase('vi'));
     const theme=productTheme(p), image=safeImageUrl(p.imageUrl);
@@ -128,7 +128,7 @@
       <div class="product-visual theme-${theme} ${image?'has-product-image':''}" aria-label="Hình minh họa ${escapeHTML(title)}">
         <div class="poster-grid"></div><div class="poster-orbit poster-orbit-a"></div><div class="poster-orbit poster-orbit-b"></div>
         <div class="poster-content"><span class="poster-kicker">NMINHIOS • DIGITAL GOODS</span><strong class="poster-title">${artName}</strong><span class="poster-subtitle">${posterLabel} / INSTANT ACCESS</span><div class="poster-perks"><span>✓ READY</span><span>⚡ FAST</span><span>◇ DIGITAL</span></div></div>
-        <div class="poster-emblem"><span class="product-emoji">${escapeHTML(emblem)}</span><i>✦</i></div>
+        <div class="poster-emblem"><span class="product-emblem-letter">${escapeHTML(emblem)}</span><span class="product-emblem-spark" aria-hidden="true"></span></div>
         ${image?`<img class="product-main-image" src="${escapeHTML(image)}" loading="lazy" decoding="async" alt="Ảnh ${escapeHTML(title)}"/>`:''}
         <span class="product-badge ${badgeClass}">${escapeHTML(p.badge||'HOT')}</span>
         ${discount?`<span class="discount-tag">-${discount}%</span>`:''}
@@ -191,8 +191,8 @@
     const rows=getCartItems();const empty=rows.length===0;
     $('#cartEmpty').classList.toggle('hidden',!empty);$('#cartBottom').classList.toggle('hidden',empty);
     $('#cartItems').innerHTML=rows.map(({id,qty,product:p})=>`<div class="cart-line"><div class="cart-line-visual">${escapeHTML(p.icon||'✦')}</div><div class="cart-line-main"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · ${money(p.price)}/sp</small><div class="quantity-control"><button data-qty="${escapeHTML(id)}" data-delta="-1" aria-label="Giảm số lượng">−</button><span>${qty}</span><button data-qty="${escapeHTML(id)}" data-delta="1" aria-label="Tăng số lượng">+</button><span class="cart-line-price">${money(p.price*qty)}</span></div></div><button class="remove-item" data-remove="${escapeHTML(id)}" aria-label="Xóa sản phẩm">×</button></div>`).join('');
-    $('#cartSubtotal').textContent=money(subtotal());$('#cartTotal').textContent=money(total());$('#cartDiscount').textContent='−'+money(discountAmount());$('#discountLine').classList.toggle('hidden',!state.coupon);const discountLabel=$('#discountLabel');if(discountLabel)discountLabel.textContent=apiMode()?'Mã giảm giá':'Ưu đãi demo';
-    $('#couponNote').textContent=state.coupon?(apiMode()?'Mã NMINH10 sẽ được máy chủ xác minh.':'Đã áp dụng ưu đãi demo 10%.'):'';
+    $('#cartSubtotal').textContent=money(subtotal());$('#cartTotal').textContent=money(total());$('#cartDiscount').textContent='−'+money(discountAmount());const personalPercent=Math.max(0,Number(state.currentUser?.discountPercent)||0);const hasDiscount=state.coupon||personalPercent>0;$('#discountLine').classList.toggle('hidden',!hasDiscount);const discountLabel=$('#discountLabel');if(discountLabel)discountLabel.textContent=personalPercent>0?`Ưu đãi riêng ${personalPercent}%`:(apiMode()?'Mã giảm giá':'Ưu đãi demo');
+    $('#couponNote').textContent=state.coupon?(personalPercent>0?'Tài khoản có ưu đãi riêng; mã công khai không cộng chồng.':(apiMode()?'Mã NMINH10 sẽ được máy chủ xác minh.':'Đã áp dụng ưu đãi demo 10%.')):'';
     updateCartBadge();
   }
   function openCart() { renderCart();$('#overlay').classList.add('open');$('#cartDrawer').classList.add('open');$('#cartDrawer').setAttribute('aria-hidden','false');document.body.style.overflow='hidden'; }
@@ -203,7 +203,7 @@
   function openCheckout() {
     if(!state.cart.length){toast('Giỏ hàng trống','Thêm sản phẩm trước khi đặt hàng.','error');return;}
     if(apiMode() && !state.currentUser) { toast('Cần đăng nhập','Tạo tài khoản hoặc đăng nhập trước khi đặt hàng.','error'); setAuthMode('login'); openModal('authModal'); return; }
-    const items=getCartItems();$('#checkoutSummary').innerHTML=items.map(r=>`<div class="summary-line"><span>${escapeHTML(r.product.name)} × ${r.qty}</span><strong>${money(r.product.price*r.qty)}</strong></div>`).join('')+`<div class="summary-line"><span>Tạm tính</span><strong>${money(subtotal())}</strong></div>${state.coupon?`<div class="summary-line"><span>${apiMode()?'Mã giảm giá':'Ưu đãi demo'}</span><strong>−${money(discountAmount())}</strong></div>`:''}<div class="summary-line total"><span>Tổng thanh toán</span><strong>${money(total())}</strong></div>`;
+    const items=getCartItems();$('#checkoutSummary').innerHTML=items.map(r=>`<div class="summary-line"><span>${escapeHTML(r.product.name)} × ${r.qty}</span><strong>${money(r.product.price*r.qty)}</strong></div>`).join('')+`<div class="summary-line"><span>Tạm tính</span><strong>${money(subtotal())}</strong></div>${(state.coupon||Number(state.currentUser?.discountPercent)>0)?`<div class="summary-line"><span>${Number(state.currentUser?.discountPercent)>0?`Ưu đãi riêng ${Number(state.currentUser.discountPercent)}%`:(apiMode()?'Mã giảm giá':'Ưu đãi demo')}</span><strong>−${money(discountAmount())}</strong></div>`:''}<div class="summary-line total"><span>Tổng thanh toán</span><strong>${money(total())}</strong></div>`;
     const user=state.currentUser;if(user){$('#checkoutName').value=user.name||'';$('#checkoutEmail').value=user.email||'';}
     openModal('checkoutModal');
   }
@@ -271,25 +271,100 @@
     if(!order){$('#trackResult').classList.remove('hidden');$('#trackResult').innerHTML=`<p>${apiMode()?'Không tìm thấy đơn hoặc bạn không có quyền xem đơn này.':'Không tìm thấy mã đơn này trên trình duyệt hiện tại.'}</p>`;return;}
     $('#trackResult').classList.remove('hidden');$('#trackResult').innerHTML=`<h3>Đơn ${escapeHTML(order.id)} <span class="status-pill ${statusClass(order.status)}">${statusText(order.status)}</span></h3><p><strong>Ngày tạo:</strong> ${shortDate(order.createdAt)}</p><p><strong>Người nhận:</strong> ${escapeHTML(order.customer?.name||'—')}</p><p><strong>Sản phẩm:</strong> ${escapeHTML((order.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', '))}</p><p><strong>Tổng tiền:</strong> ${money(order.total)}</p><p><strong>Thanh toán:</strong> ${order.paymentMethod==='bank_transfer'?'Chuyển khoản ngân hàng':'Cổng thanh toán'} ${order.demo?'· Bản demo':''}</p>${apiMode()&&['paid','delivered'].includes(order.status)?`<button class="btn btn-ghost btn-small" data-delivery="${escapeHTML(order.id)}">Xem sản phẩm số đã cấp</button><div id="deliveryResult" class="delivery-result hidden"></div>`:''}`;
   }
+  function renderAdminUsers() {
+    const wrap=$('#adminUsersList'); if(!wrap)return;
+    const list=apiMode()?state.remoteUsers:profiles();
+    if(!list.length){wrap.innerHTML='<div class="empty-table"><strong>Chưa có tài khoản khách hàng</strong><p>Hãy mở nút Tài khoản ở góc trên, chọn Tạo tài khoản để tạo một người dùng thử. Sau đó quay lại đây để nâng quyền Seller và đặt ưu đãi.</p></div>';return;}
+    wrap.innerHTML=list.map(u=>{
+      const isSeller=apiMode()?Boolean(u.isSeller||u.role==='seller'):Boolean(u.isSeller||u.role==='seller');
+      const percent=Math.max(0,Math.min(90,Number(u.discountPercent)||0));
+      const roleLabel=u.role==='admin'?'Quản trị viên':(isSeller?'Seller':'Khách hàng');
+      const initial=(u.name||u.email||'U').trim().slice(0,1).toUpperCase();
+      return `<div class="managed-user-row" data-user-row="${escapeHTML(u.id)}"><div class="managed-user-identity"><span class="managed-avatar">${escapeHTML(initial)}</span><div><strong>${escapeHTML(u.name||'Người dùng')}</strong><small>${escapeHTML(u.email||'')} · Tham gia ${escapeHTML(shortDate(u.createdAt||new Date().toISOString()))}</small></div></div><div class="managed-user-role"><label>Vai trò<select data-user-role="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}><option value="customer" ${!isSeller&&u.role!=='admin'?'selected':''}>Khách hàng</option><option value="seller" ${isSeller?'selected':''}>Seller</option><option value="admin" disabled>Quản trị viên</option></select></label></div><div class="managed-user-discount"><label>Giảm riêng (%)<input type="number" min="0" max="90" step="1" value="${percent}" data-user-discount="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}/></label></div><div class="managed-user-actions"><span class="role-chip ${u.role==='admin'?'role-admin':isSeller?'role-seller':'role-customer'}">${roleLabel}</span><button class="btn btn-primary btn-small" data-save-user="${escapeHTML(u.id)}" ${u.role==='admin'?'disabled':''}>Lưu thay đổi</button></div></div>`;
+    }).join('');
+  }
+  async function saveUserPermissions(id) {
+    const row=$(`[data-user-row="${CSS.escape(id)}"]`); if(!row)return;
+    const isSeller=$(`[data-user-role="${CSS.escape(id)}"]`,row)?.value==='seller';
+    const discountPercent=Number($(`[data-user-discount="${CSS.escape(id)}"]`,row)?.value);
+    if(!Number.isInteger(discountPercent)||discountPercent<0||discountPercent>90){toast('Mức giảm giá không hợp lệ','Nhập số nguyên từ 0 đến 90%.','error');return;}
+    if(apiMode()) {
+      try { const result=await apiRequest(`/api/admin/users/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({isSeller,discountPercent})});state.remoteUsers=state.remoteUsers.map(u=>u.id===id?result.user:u);renderAdminUsers();if(state.currentUser?.id===id){state.currentUser={...state.currentUser,...result.user};updateProfileUI();}toast('Đã cập nhật tài khoản',`${result.user.name}: ${result.user.role}, ưu đãi ${result.user.discountPercent}%.`); }
+      catch(err){toast('Không lưu được quyền',err.message,'error');}
+      return;
+    }
+    const list=profiles(),idx=list.findIndex(u=>u.id===id);if(idx<0){toast('Không tìm thấy hồ sơ','Tài khoản demo có thể đã bị xóa khỏi bộ nhớ trình duyệt.','error');return;}
+    list[idx]={...list[idx],isSeller,role:isSeller?'seller':'customer',discountPercent};saveProfiles(list);
+    if(state.currentUser?.id===id){state.currentUser={...state.currentUser,isSeller,role:isSeller?'seller':'customer',discountPercent};writeJSON(STORAGE.session,state.currentUser);updateProfileUI();if(state.view==='seller')renderSeller();}
+    renderAdminUsers();toast('Đã cập nhật hồ sơ demo',`${list[idx].name}: ${isSeller?'Seller':'Khách hàng'}, ưu đãi ${discountPercent}%.`);
+  }
+  function renderSellerProducts() {
+    const wrap=$('#sellerProductsList');if(!wrap)return;
+    const items=apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id);
+    $('#sellerProductCount').textContent=String(items.length);
+    wrap.innerHTML=items.length?items.map(p=>`<div class="seller-product-row"><div class="seller-product-thumb">${safeImageUrl(p.imageUrl)?`<img src="${escapeHTML(safeImageUrl(p.imageUrl))}" alt="" loading="lazy"/>`:''}</div><div class="seller-product-copy"><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.category)} · ${Number(p.stock)||0} trong kho · ${p.active===false?'Đang ẩn':'Đang bán'}</small></div><div class="seller-product-price"><strong>${money(p.price)}</strong>${Number(p.originalPrice)>Number(p.price)?`<del>${money(p.originalPrice)}</del>`:''}</div><div class="seller-product-actions"><button class="mini-action" data-seller-edit="${escapeHTML(p.id)}">Sửa</button><button class="mini-action danger" data-seller-delete="${escapeHTML(p.id)}">Ẩn</button></div></div>`).join(''):'<div class="empty-table"><strong>Bạn chưa đăng sản phẩm</strong><p>Nhấn “Thêm sản phẩm” để tạo listing đầu tiên của shop.</p></div>';
+  }
+  async function renderSeller() {
+    const user=state.currentUser;
+    if(!user){$('#sellerProductsList').innerHTML='<div class="empty-table">Đăng nhập trước để mở kênh Seller.</div>';$('#sellerAddProduct').disabled=true;return;}
+    const allowed=user.role==='seller'||user.isSeller;
+    $('#sellerWelcome').textContent=allowed?`Xin chào, ${user.name||'Seller'}`:'Chưa được cấp quyền Seller';
+    $('#sellerDescription').textContent=allowed?'Bạn có thể đăng sản phẩm và chỉnh sửa các listing do chính tài khoản này tạo.':'Hãy tạo tài khoản, sau đó tài khoản quản trị vào “Khách hàng & Seller” để cấp quyền Seller.';
+    $('#sellerAddProduct').disabled=!allowed;
+    if(!allowed){$('#sellerProductsList').innerHTML='<div class="seller-locked"><strong>Kênh Seller đang khóa</strong><p>Quyền này chỉ được cấp bởi quản trị viên. Bản demo có thể thử ngay tại mục Quản trị cửa hàng.</p><button class="btn btn-ghost btn-small" data-view="admin">Mở quản trị demo</button></div>';return;}
+    if(apiMode()) {try{const data=await apiRequest('/api/seller/products');state.sellerProducts=data.items||[];}catch(err){$('#sellerProductsList').innerHTML=`<div class="empty-table">${escapeHTML(err.message)}</div>`;return;}}
+    renderSellerProducts();
+  }
+  function openSellerEditor(product=null) {
+    const user=state.currentUser;if(!user||(user.role!=='seller'&&!user.isSeller)){toast('Chưa có quyền Seller','Quản trị viên cần cấp quyền này trước.','error');return;}
+    state.editingSellerProductId=product?.id||null;
+    $('#sellerFormTitle').textContent=product?'Chỉnh sửa sản phẩm':'Đăng sản phẩm mới';$('#sellerEditProductId').value=product?.id||'';
+    $('#sellerPName').value=product?.name||'';$('#sellerPCategory').value=product?.category||'Menu Key';$('#sellerPPrice').value=product?.price??'';$('#sellerPOriginalPrice').value=product?.originalPrice??'';$('#sellerPStock').value=product?.storedStock??product?.stock??10;$('#sellerPActive').value=product?.active===false?'false':'true';$('#sellerPImageUrl').value=product?.imageUrl||'';$('#sellerPGalleryUrls').value=productGallery(product).join('\n');$('#sellerPDescription').value=product?.description||'';$('#sellerPDetails').value=product?.details||'';$('#sellerPBadge').value=product?.badge||'';$('#sellerPTheme').value=product?.theme||'blue';
+    renderSellerImagePreview();$('#sellerProductForm').classList.remove('hidden');$('#sellerProductForm').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  function renderSellerImagePreview() {
+    const wrap=$('#sellerImagePreview');if(!wrap)return;
+    const main=safeImageUrl($('#sellerPImageUrl').value),gallery=$('#sellerPGalleryUrls').value.split(/\r?\n/).map(safeImageUrl).filter(Boolean).slice(0,5),images=[...new Set([main,...gallery].filter(Boolean))];
+    wrap.innerHTML=images.length?images.map((src,i)=>`<div class="editor-preview-item"><img src="${escapeHTML(src)}" alt="Ảnh xem trước ${i+1}" loading="lazy"/><small>${i===0&&src===main?'Ảnh bìa':`Ảnh mô tả ${i}`}</small></div>`).join(''):'<span>Dán URL ảnh HTTPS để xem trước hình sản phẩm.</span>';
+  }
+  async function saveSellerProduct(e) {
+    e.preventDefault();const id=state.editingSellerProductId,name=$('#sellerPName').value.trim(),price=Number($('#sellerPPrice').value),rawOrig=$('#sellerPOriginalPrice').value.trim(),originalPrice=rawOrig===''?null:Number(rawOrig),stock=Number($('#sellerPStock').value),imageUrl=$('#sellerPImageUrl').value.trim(),galleryImages=$('#sellerPGalleryUrls').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    const validHttps=x=>{try{return new URL(x).protocol==='https:';}catch(_){return false;}};
+    if(name.length<2||!Number.isSafeInteger(price)||price<0||!Number.isSafeInteger(stock)||stock<0){toast('Dữ liệu chưa hợp lệ','Tên, giá và tồn kho cần là giá trị hợp lệ.','error');return;}
+    if(originalPrice!==null&&(!Number.isSafeInteger(originalPrice)||originalPrice<=price)){toast('Giá gốc chưa hợp lệ','Giá gốc cần cao hơn giá bán.','error');return;}
+    if(imageUrl&&!validHttps(imageUrl)){toast('URL ảnh chưa hợp lệ','Dùng đường dẫn HTTPS trực tiếp.','error');return;}
+    if(galleryImages.length>5||galleryImages.some(x=>!validHttps(x))){toast('Thư viện ảnh chưa hợp lệ','Tối đa 5 ảnh mô tả, mỗi ảnh dùng URL HTTPS riêng.','error');return;}
+    const old=(apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id)).find(p=>p.id===id);
+    const item={id:id||`seller-${makeId('P').toLowerCase()}`,name,category:$('#sellerPCategory').value,price,originalPrice,stock,imageUrl,galleryImages,description:$('#sellerPDescription').value.trim(),details:$('#sellerPDetails').value.trim(),badge:$('#sellerPBadge').value.trim()||'SELLER',icon:'',theme:$('#sellerPTheme').value,featured:old?.featured??(products().length+1),deliveryMode:'manual',active:$('#sellerPActive').value==='true'};
+    try {
+      if(apiMode()){await apiRequest(id?`/api/seller/products/${encodeURIComponent(id)}`:'/api/seller/products',{method:id?'PUT':'POST',body:JSON.stringify(item)});await loadServerCatalog(false);const own=await apiRequest('/api/seller/products');state.sellerProducts=own.items||[];}
+      else {const list=products(),idx=list.findIndex(p=>p.id===id);item.ownerId=state.currentUser.id;if(idx>=0)list[idx]={...list[idx],...item};else list.push(item);saveProducts(list);}
+      $('#sellerProductForm').classList.add('hidden');renderSellerProducts();renderHome();renderShop();toast(id?'Đã cập nhật sản phẩm':'Đã đăng sản phẩm',name);
+    } catch(err){toast('Không lưu được sản phẩm',err.message,'error');}
+  }
+
   function renderAdmin() {
     $('#apiBaseUrl').value=currentApiBase() || (apiMode()?window.location.origin:'');
+    if(!apiMode()) { const title=$('#admin-warning-title'),copy=$('#admin-warning-copy'); if(title)title.textContent='ADMIN DEMO · DỮ LIỆU CHỈ Ở TRÌNH DUYỆT NÀY'; if(copy)copy.textContent='Bạn đang ở chế độ thử: có thể thêm/sửa sản phẩm, tạo hồ sơ khách hàng, nâng quyền seller và đặt giảm giá riêng. Các thay đổi demo chỉ lưu trên thiết bị này.'; }
     if(apiMode()) { refreshAdminData(); return; }
-    renderAdminProducts(); renderAdminOrders();
+    renderAdminProducts(); renderAdminOrders(); renderAdminUsers();
   }
   async function refreshAdminData() {
-    if(!apiMode()) { renderAdminProducts();renderAdminOrders();return; }
+    if(!apiMode()) { renderAdminProducts();renderAdminOrders();renderAdminUsers();return; }
     if(state.currentUser?.role!=='admin') {
       $('#adminProductsList').innerHTML='<div class="empty-table">Đăng nhập bằng tài khoản quản trị để xem dữ liệu này.</div>';
       $('#adminOrdersList').innerHTML='<div class="empty-table">Khu quản trị được bảo vệ ở máy chủ.</div>';
+      if($('#adminUsersList'))$('#adminUsersList').innerHTML='<div class="empty-table">Đăng nhập bằng email admin đã khai báo trong .env để quản lý khách hàng, seller và ưu đãi.</div>';
       const copy=$('#admin-warning-copy');if(copy)copy.textContent='Quyền quản trị được kiểm tra ở backend. Đăng nhập bằng email quản trị đã cấu hình khi cài đặt máy chủ.';
       $('#productForm').classList.add('hidden');
       return;
     }
     try {
-      const [p,o]=await Promise.all([apiRequest('/api/admin/products'),apiRequest('/api/admin/orders')]);
+      const [p,o,u]=await Promise.all([apiRequest('/api/admin/products'),apiRequest('/api/admin/orders'),apiRequest('/api/admin/users')]);
       state.remoteProducts=Array.isArray(p.items)?p.items:[];
       state.remoteAdminOrders=Array.isArray(o.items)?o.items:[];
-      renderAdminProducts();renderAdminOrders();renderHome();renderShop();await loadInventoryStats();
+      state.remoteUsers=Array.isArray(u.items)?u.items:[];
+      renderAdminProducts();renderAdminOrders();renderAdminUsers();renderHome();renderShop();await loadInventoryStats();
     } catch(err) { toast('Không tải được dữ liệu quản trị',err.message,'error'); }
   }
   function renderAdminProducts() {
@@ -338,11 +413,14 @@
   function updateProfileUI() {
     const u=state.currentUser,label=u?(u.name||'Thành viên'):'Tài khoản';
     $('#profileName').textContent=label;
-    $('#profileSub').textContent=u?(apiMode()?(u.role==='admin'?'Quản trị viên':'Tài khoản đã xác thực'):'Tài khoản demo'):'Đăng nhập';
+    $('#profileSub').textContent=u?(u.role==='admin'?'Quản trị viên':(u.role==='seller'||u.isSeller?'Seller':(apiMode()?'Tài khoản đã xác thực':'Tài khoản demo'))):'Đăng nhập';
     const avatarMarkup=`<img data-brand-avatar src="${escapeHTML(brandAvatarUrl())}" alt="Ảnh đại diện nminhios"/>`;
     const avatar=$('#avatarInitial');if(avatar)avatar.innerHTML=avatarMarkup;
     const bottomLabel=$('#bottomProfileLabel');if(bottomLabel)bottomLabel.textContent=label.length>10?label.slice(0,9)+'…':label;
     const bottomAvatar=$('#bottomAvatar');if(bottomAvatar)bottomAvatar.innerHTML=avatarMarkup;
+    const sellerNav=$('#sellerNavItem');if(sellerNav)sellerNav.classList.toggle('hidden',!(u&&(u.role==='seller'||u.isSeller)));
+    const discountBadge=$('#sellerDiscountBadge');if(discountBadge)discountBadge.textContent=`Ưu đãi tài khoản: ${Math.max(0,Number(u?.discountPercent)||0)}%`;
+    const discountHint=$('#personalDiscountHint');if(discountHint)discountHint.textContent=(Number(u?.discountPercent)||0)>0?`Tài khoản của bạn đang có ưu đãi riêng ${u.discountPercent}%. Ưu đãi riêng được ưu tiên thay cho mã công khai.`:'';
   }
 
   function restoreSession() {if(apiMode())return;const sess=readJSON(STORAGE.session,null);if(sess?.email){state.currentUser=sess;}}
@@ -354,7 +432,7 @@
         const payload=await apiRequest(path,{method:'POST',body:JSON.stringify({name,email,password,rememberMe:$('#rememberMe').checked})});
         state.currentUser=payload.user||null;
         await loadServerOrders();updateProfileUI();closeModal('authModal');
-        if(state.view==='admin') await refreshAdminData();
+        updateProfileUI();if(state.view==='admin') await refreshAdminData();if(state.view==='seller')renderSeller();
         toast(state.authMode==='register'?'Tạo tài khoản thành công':'Đăng nhập thành công',`Xin chào ${state.currentUser?.name||email}. Phiên đăng nhập được quản lý bởi máy chủ.`);
       } catch(err) { toast('Không thể xác thực',err.message,'error'); }
       return;
@@ -362,15 +440,15 @@
     let list=profiles();let user=list.find(x=>x.email===email);
     if(state.authMode==='register'){
       if(!name){toast('Thiếu tên hiển thị','Nhập tên để tạo hồ sơ.','error');return;}if(user){toast('Email đã có hồ sơ','Hãy dùng email khác hoặc chuyển sang đăng nhập.','error');return;}
-      user={id:makeId('USER'),name,email,createdAt:new Date().toISOString()};list.push(user);saveProfiles(list);toast('Tạo hồ sơ demo thành công','Chưa tạo tài khoản xác thực trên máy chủ.');
+      user={id:makeId('USER'),name,email,createdAt:new Date().toISOString(),isSeller:false,discountPercent:0};list.push(user);saveProfiles(list);toast('Tạo hồ sơ demo thành công','Chưa tạo tài khoản xác thực trên máy chủ.');
     } else if(!user) {toast('Chưa có hồ sơ demo','Chuyển sang Tạo tài khoản để tạo hồ sơ thử nghiệm.','error');return;}
-    state.currentUser={id:user.id,name:user.name,email:user.email,demo:true};
+    state.currentUser={id:user.id,name:user.name,email:user.email,demo:true,isSeller:Boolean(user.isSeller),role:user.isSeller?'seller':'customer',discountPercent:Number(user.discountPercent)||0};
     if($('#rememberMe').checked)writeJSON(STORAGE.session,state.currentUser);else {try{localStorage.removeItem(STORAGE.session);}catch(_){}}
     updateProfileUI();closeModal('authModal');if(state.view==='orders')renderOrders();toast('Đã vào phiên demo',`Xin chào ${user.name}.`);
   }
   async function logout() {
     if(apiMode()) { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); } catch(err) { toast('Đăng xuất chưa hoàn tất',err.message,'error');return; } }
-    state.currentUser=null;state.remoteOrders=[];try{localStorage.removeItem(STORAGE.session);}catch(_){}updateProfileUI();renderOrders();if(state.view==='admin')renderAdmin();toast('Đã đăng xuất','Phiên đăng nhập đã được xóa.');
+    state.currentUser=null;state.remoteOrders=[];try{localStorage.removeItem(STORAGE.session);}catch(_){}updateProfileUI();renderOrders();if(state.view==='admin')renderAdmin();if(state.view==='seller')goView('home');toast('Đã đăng xuất','Phiên đăng nhập đã được xóa.');
   }
   async function testApi() {
     const base=$('#apiBaseUrl').value.trim().replace(/\/+$/,'') || (apiMode()?window.location.origin:'');
@@ -392,6 +470,9 @@
       const rem=e.target.closest('[data-remove]');if(rem){removeFromCart(rem.dataset.remove);return;}
       const close=e.target.closest('[data-close-modal]');if(close){closeModal(close.dataset.closeModal);return;}
       const track=e.target.closest('[data-track]');if(track){const code=track.dataset.track;$('#trackCode').value=code;goView('track');if(apiMode())apiRequest(`/api/orders/${encodeURIComponent(code)}`).then(x=>showOrder(x.order)).catch(err=>showOrder(null));else showOrder(orders().find(x=>x.id===code));return;}
+      const saveUser=e.target.closest('[data-save-user]');if(saveUser){saveUserPermissions(saveUser.dataset.saveUser);return;}
+      const sellerEdit=e.target.closest('[data-seller-edit]');if(sellerEdit){const items=apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id);openSellerEditor(items.find(p=>p.id===sellerEdit.dataset.sellerEdit));return;}
+      const sellerDel=e.target.closest('[data-seller-delete]');if(sellerDel){const id=sellerDel.dataset.sellerDelete;const items=apiMode()?state.sellerProducts:products().filter(p=>p.ownerId===state.currentUser?.id);const item=items.find(p=>p.id===id);if(!item)return;if(!confirm(`Ẩn sản phẩm “${item.name}” khỏi cửa hàng?`))return;if(apiMode()){apiRequest(`/api/seller/products/${encodeURIComponent(id)}`,{method:'DELETE'}).then(()=>renderSeller()).then(()=>loadServerCatalog(false)).then(()=>toast('Đã ẩn sản phẩm',item.name)).catch(err=>toast('Không thể ẩn sản phẩm',err.message,'error'));}else{const list=products().map(p=>p.id===id?{...p,active:false}:p);saveProducts(list);renderSellerProducts();renderHome();renderShop();toast('Đã ẩn sản phẩm',item.name);}return;}
       const edit=e.target.closest('[data-edit-product]');if(edit){openProductEditor(products().find(p=>p.id===edit.dataset.editProduct));return;}
       const del=e.target.closest('[data-delete-product]');if(del){const p=products().find(x=>x.id===del.dataset.deleteProduct);if(!p)return;if(!window.confirm(`${apiMode()?'Ngừng bán':'Xóa'} sản phẩm “${p.name}”?`))return;if(apiMode()){apiRequest(`/api/admin/products/${encodeURIComponent(p.id)}`,{method:'DELETE'}).then(()=>refreshAdminData()).then(()=>toast('Đã ngừng bán',p.name)).catch(err=>toast('Không thể cập nhật',err.message,'error'));return;}saveProducts(products().filter(x=>x.id!==p.id));state.cart=state.cart.filter(x=>x.id!==p.id);storeCart();renderAdminProducts();renderHome();renderShop();renderCart();toast('Đã xóa sản phẩm',p.name);return;}
       const copy=e.target.closest('[data-copy]');if(copy){const text=copy.dataset.copy;if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).then(()=>toast('Đã sao chép',text)).catch(()=>toast('Không sao chép được','Hãy sao chép thủ công.','error'));else toast('Hãy sao chép thủ công',text);return;}
@@ -420,7 +501,9 @@
     $$('[data-auth-mode]').forEach(b=>b.addEventListener('click',()=>setAuthMode(b.dataset.authMode)));$('#authForm').addEventListener('submit',authSubmit);
     $('#viewNewOrder').addEventListener('click',()=>{closeModal('orderSuccessModal');goView('orders');});
     $('#openTerms').addEventListener('click',()=>openModal('termsModal'));
-    $('#addProductBtn').addEventListener('click',()=>openProductEditor());$('#closeProductForm').addEventListener('click',()=>$('#productForm').classList.add('hidden'));$('#cancelProductForm').addEventListener('click',()=>$('#productForm').classList.add('hidden'));$('#productForm').addEventListener('submit',saveProductFromForm);
+    $('#addProductBtn').addEventListener('click',()=>openProductEditor());
+    $('#refreshUsersBtn')?.addEventListener('click',()=>{if(apiMode()){apiRequest('/api/admin/users').then(x=>{state.remoteUsers=x.items||[];renderAdminUsers();toast('Đã làm mới','Danh sách tài khoản đã cập nhật.');}).catch(err=>toast('Không tải được người dùng',err.message,'error'));}else renderAdminUsers();});
+    $('#sellerAddProduct')?.addEventListener('click',()=>openSellerEditor());$('#sellerCloseForm')?.addEventListener('click',()=>$('#sellerProductForm').classList.add('hidden'));$('#sellerCancelForm')?.addEventListener('click',()=>$('#sellerProductForm').classList.add('hidden'));$('#sellerProductForm')?.addEventListener('submit',saveSellerProduct);$('#sellerPImageUrl')?.addEventListener('input',renderSellerImagePreview);$('#sellerPGalleryUrls')?.addEventListener('input',renderSellerImagePreview);$('#closeProductForm').addEventListener('click',()=>$('#productForm').classList.add('hidden'));$('#cancelProductForm').addEventListener('click',()=>$('#productForm').classList.add('hidden'));$('#productForm').addEventListener('submit',saveProductFromForm);
     $('#pImageUrl').addEventListener('input',renderProductImagePreview);$('#pGalleryUrls').addEventListener('input',renderProductImagePreview);
     document.addEventListener('error',e=>{const img=e.target;if(!(img instanceof HTMLImageElement))return;if(img.matches('.product-main-image,.editor-preview-item img,.admin-product-icon img'))img.classList.add('image-failed');if(img.matches('.gallery-thumb img'))img.parentElement?.classList.add('image-failed');if(img.matches('.product-detail-hero')){img.classList.add('image-failed');if(!img.previousElementSibling?.classList.contains('product-detail-placeholder')){const fallback=document.createElement('div');fallback.className='product-detail-placeholder theme-blue';const mark=document.createElement('span');mark.textContent='✦';const label=document.createElement('strong');label.textContent=img.alt||'Ảnh sản phẩm';fallback.append(mark,label);img.parentElement?.insertBefore(fallback,img);}}if(img.matches('.brand-mark-image img,.mobile-brand-icon img,.avatar-image img,.bottom-avatar-image img'))img.parentElement?.classList.add('avatar-image-fallback');},true);
     $$('.admin-tab').forEach(b=>b.addEventListener('click',()=>{$$('.admin-tab').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-pane').forEach(x=>x.classList.toggle('active',x.id===`admin-${b.dataset.adminTab}`));}));
@@ -435,9 +518,9 @@
   }
   function applyModeCopy() {
     if(!apiMode()) return;
-    const adminNav=$$('.nav-item[data-view="admin"]')[0]; if(adminNav) adminNav.innerHTML='<span class="nav-icon">⚙</span><span>Quản trị cửa hàng</span>';
+    const adminNav=$$('.nav-item[data-view="admin"]')[0]; if(adminNav) adminNav.innerHTML='<span class="nav-icon nav-wordmark">ADM</span><span>Quản trị cửa hàng</span>';
     const demoBadge=$$('.demo-badge')[0]; if(demoBadge) demoBadge.textContent='SERVER MODE';
-    const warning=$$('.admin-warning')[0]; if(warning) warning.innerHTML='<strong>🔒 Quyền quản trị phía máy chủ</strong><p id="admin-warning-copy">Chỉ tài khoản có role admin mới được sửa sản phẩm, xem đơn và quản lý kho.</p>';
+    const warning=$$('.admin-warning')[0]; if(warning) warning.innerHTML='<strong>KHU VỰC QUẢN TRỊ ĐƯỢC BẢO VỆ</strong><p id="admin-warning-copy">Chỉ tài khoản có role admin mới được sửa sản phẩm, xem đơn và quản lý kho.</p>';
     const checkoutNote=$$('.secure-note')[0]; if(checkoutNote) checkoutNote.textContent='◇ Thanh toán chỉ xác nhận sau webhook hợp lệ';
     const bankCopy=$('#bank-payment-copy'); if(bankCopy) bankCopy.textContent='Thông tin thanh toán do backend cung cấp sau khi tạo đơn.';
     const accountHint=$('#checkout-account-hint'); if(accountHint) accountHint.textContent='Tên và email nhận đơn được lấy từ tài khoản đang đăng nhập.';
@@ -467,7 +550,7 @@
     const savedCart=readJSON(STORAGE.cart,[]);state.cart=Array.isArray(savedCart)?savedCart.filter(x=>x&&typeof x.id==='string'&&Number.isFinite(x.qty)&&x.qty>0).map(x=>({id:x.id,qty:Math.min(99,Math.floor(x.qty))})):[];
     if(!apiMode() && !readJSON(STORAGE.products,null))saveProducts(seedProducts.map(p=>({...p})));
     restoreSession();applyModeCopy();applyBrandAvatar();updateProfileUI();bindEvents();setAuthMode('login');
-    renderHome();renderShop();renderCart();renderOrders();
+    renderHome();renderShop();renderCart();renderOrders();updateProfileUI();
     if(apiMode()) {
       try { await loadServerCatalog(false); await loadServerSession(); state.apiReady=true; }
       catch(err) { state.apiReady=false; toast('Chưa kết nối máy chủ',`${err.message}. Kiểm tra server và thử tải lại trang.`,'error'); }

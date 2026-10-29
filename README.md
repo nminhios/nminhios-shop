@@ -1,26 +1,23 @@
-# nminhios shop — GitHub Pages preview
+# nminhios shop — Admin/Seller demo (static preview)
 
-This is the static, demo-only frontend for previewing the nminhios shop look and testing basic local cart/order interactions.
+## Start here
+Open `index.html` directly to inspect the UI, or upload **all files in this folder** to the root of a GitHub repository and enable GitHub Pages (`Settings → Pages → Deploy from a branch → main → /(root)`).
 
-## Publish with GitHub Pages
+This static package includes every linked frontend file (`styles.css`, `storefront.css`, `admin-enhancements.css`, `config.js`, `app.js`). It is intentionally demo-only and does not contain backend code or private secrets.
 
-1. Create a repository (for example `nminhios-shop-preview`).
-2. Upload the *contents* of this folder into the repository root: `index.html`, `styles.css`, `storefront.css`, `app.js`, and `config.js`.
-3. Go to **Settings → Pages**.
-4. Under **Build and deployment**, choose **Deploy from a branch**, select `main` and `/(root)`, then save.
-5. Open the GitHub Pages URL shown on that page.
+## Try Admin + Seller
+1. Open **Quản trị cửa hàng** from the left menu. On a phone, tap the top-left menu button first.
+2. Select **Khách hàng & Seller**.
+3. Tap **Tài khoản** → **Tạo tài khoản**, fill a test name/email/password, and submit.
+4. Return to Admin → **Khách hàng & Seller**, select `Seller`, set a private discount from 0–90%, and press **Lưu thay đổi**.
+5. The **Kênh Seller** section becomes available while that test account is signed in. Add a product, set price/original price/stock/category, add a cover image URL and up to five HTTPS gallery-image URLs, write description/details, and save it.
+6. Visit the store to see the product. In the Seller section you can edit or hide your own listing.
 
-## Important
+Demo users, product changes, and orders are stored in this browser's localStorage only. They are not shared across devices and are not real accounts/orders/payments. Do not use a static demo as a real admin panel.
 
-- This is preview mode only. Demo orders and profiles use the browser's local storage and are not shared across devices.
-- Payment information is fake in demo mode; do not send money to the sample account shown by this page.
-- The frontend must be publicly delivered to browsers and its HTML/CSS/JavaScript can be inspected. Do not place private keys, bank secrets, passwords or the full backend source in a public preview repository.
-- GitHub Pages cannot run Node.js routes, SQLite, server-side login or signed bank webhooks. Those require a separate Node.js host. To use the full-stack project, follow the README in the full-stack ZIP and set `DEMO_MODE: false` only when you are ready to use the backend.
+## Visuals and assets
+- Uses your requested avatar URL: `https://cdn.upanhlaylink.com/i/TLOGJDhT.png`.
+- Product cover and gallery images are entered as HTTPS URLs. Static hosting does not include an image upload server.
 
-
-## Add/edit products in preview mode
-
-Open **Quản trị demo → Sản phẩm → Thêm sản phẩm**. You can set the current sale price, an optional higher original price, stock, category, short and long descriptions, a cover image URL and up to five gallery image URLs (one HTTPS URL per line). Changes are stored only in the current browser's localStorage, not shared with visitors on other devices. Host images first and paste direct HTTPS links; this preview does not upload image files. The provided nminhios avatar image URL is used for the brand avatar.
-
-
-To change the shop avatar later, edit the public `BRAND_AVATAR_URL` field in `config.js`. It should be a public HTTPS image URL.
+## For a real shop
+Use the separate full-stack package. Run Node.js on a server and keep `.env`, secrets, and the SQLite database outside the public directory. GitHub Pages cannot execute Node.js routes or protect admin actions.
