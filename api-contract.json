@@ -1,0 +1,53 @@
+{
+  "name": "nminhios shop API",
+  "version": "1.0.0",
+  "runtime": "Node.js >= 22.13",
+  "security": {
+    "session": "Server-issued HttpOnly SameSite=Lax cookie; Secure when NODE_ENV=production",
+    "passwords": "Salted scrypt hash stored server-side; never returned to browser",
+    "mutationOrigin": "POST/PUT/PATCH/DELETE routes require an Origin matching PUBLIC_ORIGIN",
+    "authorization": "Customer endpoints require an authenticated session and enforce order ownership; admin endpoints check the server-side admin role",
+    "production": "Run behind HTTPS. Do not put secrets into public/config.js or commit .env."
+  },
+  "health": { "method": "GET", "path": "/health", "response": { "ok": true, "service": "nminhios-shop-api", "version": "1.0.0" } },
+  "auth": {
+    "register": { "method": "POST", "path": "/api/auth/register", "body": { "name": "Customer", "email": "customer@example.com", "password": "10+ characters", "rememberMe": true }, "success": 201, "response": { "user": { "id": "usr-id", "name": "Customer", "email": "customer@example.com", "role": "customer", "createdAt": "ISO-8601" } } },
+    "login": { "method": "POST", "path": "/api/auth/login", "body": { "email": "customer@example.com", "password": "password", "rememberMe": true }, "response": "User object plus Set-Cookie HttpOnly session" },
+    "me": { "method": "GET", "path": "/api/auth/me", "response": { "user": null } },
+    "logout": { "method": "POST", "path": "/api/auth/logout", "body": {}, "response": { "ok": true } }
+  },
+  "products": {
+    "list": { "method": "GET", "path": "/api/products", "authentication": "public", "response": { "items": [{ "id": "key-weekly", "name": "Menu Premium 7 ngày", "category": "Menu Key", "price": 135000, "stock": 99, "deliveryMode": "manual", "active": true }] } },
+    "adminList": { "method": "GET", "path": "/api/admin/products", "role": "admin", "includesInactive": true },
+    "create": { "method": "POST", "path": "/api/admin/products", "role": "admin", "body": { "name": "Product", "category": "Menu Key", "price": 10000, "stock": 0, "deliveryMode": "auto", "active": true } },
+    "update": { "method": "PUT", "path": "/api/admin/products/{id}", "role": "admin" },
+    "archive": { "method": "DELETE", "path": "/api/admin/products/{id}", "role": "admin", "note": "Soft-archives product; active pending/paid orders prevent archiving." }
+  },
+  "orders": {
+    "create": { "method": "POST", "path": "/api/orders", "role": "customer", "body": { "items": [{ "productId": "key-weekly", "quantity": 1 }], "couponCode": "NMINH10", "note": "Optional note" }, "rules": ["Server recalculates prices and discount", "Server verifies stock inside a write transaction", "Pending orders reserve stock for 30 minutes"], "response": { "order": { "id": "NM-ABC123", "status": "pending", "total": 135000, "currency": "VND" } } },
+    "listMine": { "method": "GET", "path": "/api/orders?limit=100", "role": "customer", "rules": ["Only the current user's orders are returned"] },
+    "detail": { "method": "GET", "path": "/api/orders/{orderCode}", "role": "owner only" },
+    "delivery": { "method": "GET", "path": "/api/orders/{orderCode}/delivery", "role": "owner only", "rules": ["Requires paid/delivered status", "Decrypted inventory values are never included in the catalog"] }
+  },
+  "payments": {
+    "create": { "method": "POST", "path": "/api/payments/create", "role": "order owner", "body": { "orderId": "NM-ABC123", "provider": "bank_transfer" }, "note": "Creates a pending payment and may return configured display-only bank details; this alone does not prove payment." },
+    "bankWebhook": {
+      "method": "POST",
+      "path": "/api/webhooks/bank",
+      "authentication": "x-nminhios-signature: sha256=<hex HMAC-SHA256 of the exact raw JSON request body>",
+      "body": { "eventId": "unique-event", "transactionId": "provider-transaction-id", "reference": "NM-ABC123", "amount": 135000, "currency": "VND" },
+      "rules": ["Requires server-only BANK_WEBHOOK_SECRET", "Checks HMAC before parsing/trusting fields", "Rejects invalid signature and mismatched amount/currency/order reference", "Records unique event/transaction IDs and treats duplicate deliveries idempotently", "Marks paid only after verified signed webhook", "Runs auto fulfillment only after verified payment"],
+      "productionNote": "Generic adapter only. Adapt the signature canonicalization, timestamp checks and field mapping to the selected provider's official specification before real use."
+    }
+  },
+  "inventory": {
+    "list": { "method": "GET", "path": "/api/admin/inventory", "role": "admin", "returns": "Counts only; not decrypted inventory data" },
+    "import": { "method": "POST", "path": "/api/admin/inventory", "role": "admin", "body": { "productId": "key-weekly", "items": ["authorized-product-key-1", "authorized-product-key-2"] }, "rules": ["Requires product deliveryMode=auto", "Each non-empty line is encrypted with AES-256-GCM using DIGITAL_DELIVERY_KEY", "Maximum 1000 lines and 4000 chars per item per request"] }
+  },
+  "adminOrders": {
+    "list": { "method": "GET", "path": "/api/admin/orders", "role": "admin" },
+    "cancel": { "method": "PATCH", "path": "/api/admin/orders/{orderCode}", "role": "admin", "body": { "status": "cancelled" }, "rules": ["Only pending orders can be cancelled", "Stock reservation is released"] },
+    "fulfill": { "method": "POST", "path": "/api/admin/orders/{orderCode}/fulfill", "role": "admin", "body": {}, "rules": ["Requires paid status", "Auto inventory must be assigned before delivery can be confirmed"] }
+  },
+  "notIncludedYet": ["Real provider-specific bank API adapter", "Email/OTP verification", "Password reset", "Shipping APIs", "Tax invoice generation", "Persistent shared distributed rate limiter"]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "nminhios-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "nminhios shop digital storefront with server-side authentication, orders and signed bank webhook integration points",
+  "type": "commonjs",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/config.js"
+  }
+}
